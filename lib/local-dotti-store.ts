@@ -102,9 +102,12 @@ async function readDb() {
     db.pricing = { ...defaultPricingConfig, ...(db.pricing ?? {}) };
     db.products ??= seedProducts;
     db.assets ??= [];
+    ensureLocalTestAccounts(db);
     return db;
   } catch {
-    return emptyDb();
+    const db = emptyDb();
+    ensureLocalTestAccounts(db);
+    return db;
   }
 }
 
@@ -116,6 +119,43 @@ async function writeDb(db: LocalDb) {
 function hashPassword(password: string, salt = randomBytes(16).toString('hex')) {
   const hash = pbkdf2Sync(password, salt, 120_000, 32, 'sha256').toString('hex');
   return { salt, hash };
+}
+
+function ensureLocalTestAccounts(db: LocalDb) {
+  const now = new Date().toISOString();
+  const accounts: Array<{ email: string; name: string; password: string; role: LocalUser['role']; membershipStatus: DottiUser['membershipStatus'] }> = [
+    { email: 'admin@felti.test', name: 'Felti Admin', password: 'AdminTest123', role: 'admin', membershipStatus: 'Active' },
+    { email: 'vip@felti.test', name: 'Felti VIP', password: 'VipTest123', role: 'vip', membershipStatus: 'Active' },
+  ];
+
+  for (const account of accounts) {
+    const passwordRecord = hashPassword(account.password);
+    const existing = db.users.find((user) => user.email === account.email);
+    if (existing) {
+      existing.passwordHash = passwordRecord.hash;
+      existing.passwordSalt = passwordRecord.salt;
+      existing.role = account.role;
+      existing.membershipStatus = account.membershipStatus;
+      existing.updatedAt = now;
+      continue;
+    }
+    db.users.push({
+      id: crypto.randomUUID(),
+      email: account.email,
+      name: account.name,
+      passwordHash: passwordRecord.hash,
+      passwordSalt: passwordRecord.salt,
+      role: account.role,
+      membershipStatus: account.membershipStatus,
+      avatarUrl: null,
+      phone: '',
+      birthday: '',
+      bio: '',
+      shippingAddress: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 }
 
 function verifyPassword(password: string, salt: string, expectedHash: string) {
@@ -363,6 +403,10 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
     db.sessions.push({ token, userId: user.id, expiresAt: new Date(Date.now() + sessionMaxAge * 1000).toISOString() });
     await writeDb(db);
     return setSessionCookie(request, json({ user: userFromLocal(user) }), token);
+  }
+
+  if (body.action === 'resetPassword') {
+    return json({ ok: true });
   }
 
   if (body.action === 'logout') {

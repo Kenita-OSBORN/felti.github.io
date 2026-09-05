@@ -21,6 +21,7 @@ export const dottiApi = {
   register: (input: { name: string; email: string; password: string; confirmPassword: string }) =>
     call<{ user: DottiUser }>('register', input),
   login: (input: { email: string; password: string }) => call<{ user: DottiUser }>('login', input),
+  resetPassword: (input: { email: string }) => call<{ ok: true }>('resetPassword', input),
   logout: () => call<{ ok: true }>('logout'),
   me: () => call<{ user: DottiUser | null }>('me'),
   getPricing: () => call<{ pricing: PricingConfig }>('getPricing'),

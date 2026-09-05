@@ -252,6 +252,17 @@ export async function POST(request: NextRequest) {
       return response({ user: await profileForUser(admin, data.user.id) }, cookiesToSet);
     }
 
+    if (body.action === 'resetPassword') {
+      const email = String(body.email ?? '').trim().toLowerCase();
+      if (!validateEmail(email)) return response({ error: 'Please enter a valid email address.' }, cookiesToSet, { status: 400 });
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${siteUrl}/login`,
+      });
+      if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+      return response({ ok: true }, cookiesToSet);
+    }
+
     if (body.action === 'logout') {
       await supabase.auth.signOut();
       return response({ ok: true }, cookiesToSet);
