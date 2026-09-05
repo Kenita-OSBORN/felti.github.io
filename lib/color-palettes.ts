@@ -1,0 +1,32 @@
+export const baseColorPresets = [
+  { label: 'Cream', color: '#f8eee5' },
+  { label: 'White', color: '#fffdf9' },
+  { label: 'Soft Pink', color: '#fde2e4' },
+  { label: 'Dusty Rose', color: '#dca0a8' },
+  { label: 'Beige', color: '#ead8c5' },
+  { label: 'Light Brown', color: '#c8a58d' },
+  { label: 'Pale Yellow', color: '#fff0a9' },
+  { label: 'Sage Green', color: '#b7d7a8' },
+  { label: 'Light Blue', color: '#d7edf4' },
+  { label: 'Lavender', color: '#d8c7e8' },
+  { label: 'Gray', color: '#d8d5d0' },
+  { label: 'Black', color: '#3f342e' },
+];
+
+export const assetColorPresets = [
+  { label: 'Cream', color: '#f8eee5' },
+  { label: 'Soft Pink', color: '#ffb8c8' },
+  { label: 'Rose', color: '#e8899f' },
+  { label: 'Red', color: '#ef6f7f' },
+  { label: 'Peach', color: '#ffb997' },
+  { label: 'Yellow', color: '#ffd166' },
+  { label: 'Sage', color: '#b7d7a8' },
+  { label: 'Green', color: '#8cc084' },
+  { label: 'Sky Blue', color: '#a8d8ea' },
+  { label: 'Navy', color: '#596a9f' },
+  { label: 'Lavender', color: '#cdb4db' },
+  { label: 'Brown', color: '#8a6552' },
+  { label: 'Gray', color: '#cfcac3' },
+  { label: 'Black', color: '#3f342e' },
+  { label: 'White', color: '#fffdf9' },
+];

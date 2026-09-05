@@ -16,7 +16,7 @@ export function RestoreDraftModal({
     <Dialog open={open}>
       <DialogContent className="rounded-[28px] border-[var(--dotti-border)] bg-[var(--dotti-bg)] sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-2xl font-black">You have a saved Dotti design.</DialogTitle>
+          <DialogTitle className="text-2xl font-black">You have a saved Felti design.</DialogTitle>
         </DialogHeader>
         <div className="flex justify-end gap-2">
           <Button variant="outline" className="rounded-full bg-white" onClick={onStartNew}>

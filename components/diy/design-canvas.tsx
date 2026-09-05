@@ -1,11 +1,47 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { Copy, FlipHorizontal2, Layers, Palette, SendToBack, Trash2 } from 'lucide-react';
 
-import type { BaseShape, DesignElement } from '@/types/dotti';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { defaultBackground, getBackgroundStyle } from '@/lib/backgrounds';
+import { assetColorPresets } from '@/lib/color-palettes';
+import type { BaseCustomShape, BaseShape, DesignBackground, DesignElement } from '@/types/dotti';
 
 const CANVAS_WIDTH = 720;
 const CANVAS_HEIGHT = 560;
+const CANVAS_ASPECT_RATIO = CANVAS_WIDTH / CANVAS_HEIGHT;
+const DEFAULT_FREE_SHAPE: BaseCustomShape = {
+  width: 64,
+  height: 58,
+  radius: 22,
+  rotation: 0,
+};
+
+const canElementUseColor = (element?: DesignElement | null) =>
+  Boolean(element && element.source !== 'upload' && element.assetId.startsWith('letter-'));
+
+const getLetterMaskUrl = (element: DesignElement) => {
+  const letter = element.assetName.replace('Letter ', '').trim() || element.assetId.replace('letter-', '').toUpperCase();
+  const maskSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><text x="48" y="72" font-family="'Arial Rounded MT Bold', 'Nunito Sans', Arial, sans-serif" font-size="70" font-weight="900" text-anchor="middle" fill="#fff">${letter}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(maskSvg)}`;
+};
+
+const getCustomBaseSize = (aspectRatio = 1, containerAspectRatio = CANVAS_ASPECT_RATIO) => {
+  const maxWidth = 70;
+  const maxHeight = 70;
+  const safeRatio = Math.max(0.2, Math.min(5, aspectRatio || 1));
+  let width = maxWidth;
+  let height = (width * containerAspectRatio) / safeRatio;
+
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = (height * safeRatio) / containerAspectRatio;
+  }
+
+  return { width, height };
+};
 
 type Interaction =
   | {
@@ -36,23 +72,42 @@ type Interaction =
 
 type DesignCanvasProps = {
   baseShape: BaseShape;
+  baseColor: string;
+  baseCustomShape: BaseCustomShape;
+  background?: DesignBackground;
+  customBaseUrl?: string | null;
+  customBaseAspectRatio?: number | null;
   elements: DesignElement[];
   selectedElementId: string | null;
   onSelect: (id: string | null) => void;
   onDropAsset: (assetId: string, x: number, y: number) => void;
   onChangeElement: (id: string, patch: Partial<DesignElement>, commit?: boolean) => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onLayer: (action: 'forward' | 'backward' | 'front' | 'back') => void;
+  onFlip: (axis: 'x' | 'y') => void;
 };
 
 export function DesignCanvas({
   baseShape,
+  baseColor,
+  baseCustomShape,
+  background,
+  customBaseUrl,
+  customBaseAspectRatio,
   elements,
   selectedElementId,
   onSelect,
   onDropAsset,
   onChangeElement,
+  onDuplicate,
+  onDelete,
+  onLayer,
+  onFlip,
 }: DesignCanvasProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [interaction, setInteraction] = useState<Interaction | null>(null);
+  const freeShape = baseCustomShape ?? DEFAULT_FREE_SHAPE;
 
   const toCanvasPoint = (clientX: number, clientY: number) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -106,11 +161,39 @@ export function DesignCanvas({
 
   const selectedElement = elements.find((element) => element.id === selectedElementId);
 
+  const recoloredAssetStyle = (element: DesignElement): CSSProperties =>
+    ({
+      '--asset-color': element.color,
+      background: element.color,
+      backgroundImage: 'none',
+      maskImage: `url("${getLetterMaskUrl(element)}")`,
+      WebkitMaskImage: `url("${getLetterMaskUrl(element)}")`,
+    }) as CSSProperties;
+
+  const canRecolor = canElementUseColor(selectedElement);
+  const customBaseSize = getCustomBaseSize(customBaseAspectRatio ?? 1);
+  const baseStyle = customBaseUrl
+    ? ({
+        '--custom-base-width': `${customBaseSize.width}%`,
+        '--custom-base-height': `${customBaseSize.height}%`,
+        backgroundImage: `url(${customBaseUrl})`,
+        backgroundSize: 'contain',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+      } as CSSProperties)
+    : ({
+        '--base-color': baseColor,
+        '--base-free-width': `${freeShape.width}%`,
+        '--base-free-height': `${freeShape.height}%`,
+        '--base-free-radius': `${freeShape.radius}%`,
+        '--base-free-rotation': `${freeShape.rotation}deg`,
+      } as CSSProperties);
+
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[linear-gradient(0deg,rgba(122,86,72,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(122,86,72,0.04)_1px,transparent_1px)] bg-[size:28px_28px] p-5">
+    <div className="diy-canvas-shell flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4" style={getBackgroundStyle(background ?? defaultBackground)}>
       <div
         ref={canvasRef}
-        className="relative aspect-[720/560] w-full max-w-[920px] overflow-hidden rounded-[28px] border border-[var(--dotti-border)] bg-[#fffdf9] shadow-[var(--dotti-shadow)]"
+        className="relative aspect-[720/560] max-h-full w-full max-w-[920px] overflow-hidden rounded-[28px] border border-[var(--dotti-border)] bg-white/42 shadow-[var(--dotti-shadow)]"
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
@@ -126,7 +209,10 @@ export function DesignCanvas({
           if (event.target === event.currentTarget) onSelect(null);
         }}
       >
-        <div className={`brooch-base brooch-${baseShape}`} />
+        <div
+          className={`brooch-base brooch-${customBaseUrl ? 'custom' : baseShape}`}
+          style={baseStyle}
+        />
 
         {[...elements]
           .sort((a, b) => a.zIndex - b.zIndex)
@@ -160,7 +246,11 @@ export function DesignCanvas({
                   });
                 }}
               >
-                <img src={element.imageUrl} alt="" className="h-full w-full object-contain drop-shadow-sm" draggable={false} />
+                {canElementUseColor(element) && element.color ? (
+                  <div className="recolored-felt-asset h-full w-full" style={recoloredAssetStyle(element)} />
+                ) : (
+                  <img src={element.imageUrl} alt="" className={`h-full w-full object-contain ${element.source === 'upload' ? 'drop-shadow-sm' : 'felt-asset'}`} draggable={false} />
+                )}
                 {isSelected && (
                   <>
                     <div className="pointer-events-none absolute inset-[-6px] rounded-2xl border-2 border-[var(--dotti-berry)]" />
@@ -186,7 +276,7 @@ export function DesignCanvas({
                     <button
                       type="button"
                       aria-label="Rotate selected decoration"
-                      className="absolute left-1/2 top-[-38px] h-7 w-7 -translate-x-1/2 rounded-full border-2 border-white bg-[var(--dotti-gold)] shadow-md"
+                      className="absolute bottom-[-14px] left-[-14px] h-7 w-7 rounded-full border-2 border-white bg-[var(--dotti-gold)] shadow-md"
                       onPointerDown={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -220,7 +310,66 @@ export function DesignCanvas({
             Drop or click decorations to begin.
           </div>
         )}
-        {selectedElement && <span className="sr-only">Selected {selectedElement.assetName}</span>}
+        {selectedElement && (
+          <>
+            <div
+              className="absolute z-[1000] flex items-center gap-1 rounded-full border border-[var(--dotti-border)] bg-white/95 p-1 shadow-lg"
+              style={{
+                left: `${((selectedElement.x + selectedElement.width / 2) / CANVAS_WIDTH) * 100}%`,
+                top: `${(Math.max(8, selectedElement.y - 54) / CANVAS_HEIGHT) * 100}%`,
+                transform: 'translateX(-50%)',
+              }}
+            >
+              <button type="button" aria-label="Duplicate" className="grid size-8 place-items-center rounded-full hover:bg-[var(--dotti-blush)]" onClick={onDuplicate}>
+                <Copy className="size-4" />
+              </button>
+              {canRecolor && (
+                <Popover>
+                  <PopoverTrigger render={<button type="button" aria-label="Color" className="grid size-8 place-items-center rounded-full hover:bg-[var(--dotti-blush)]" onPointerDown={(event) => event.stopPropagation()} />}>
+                    <Palette className="size-4" />
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="center" className="w-72 rounded-[24px] border-[var(--dotti-border)] bg-white p-3">
+                    <p className="font-black">Color</p>
+                    <div className="mt-3 grid grid-cols-5 gap-2">
+                      {assetColorPresets.map((item) => (
+                        <button
+                          key={item.label}
+                          type="button"
+                          aria-label={item.label}
+                          onClick={() => onChangeElement(selectedElement.id, { color: item.color }, true)}
+                          className={`size-9 rounded-full ring-2 ${selectedElement.color?.toLowerCase() === item.color.toLowerCase() ? 'ring-[var(--dotti-berry)]' : 'ring-[var(--dotti-border)]'}`}
+                          style={{ backgroundColor: item.color }}
+                        />
+                      ))}
+                    </div>
+                    <label className="mt-3 block text-xs font-black text-[var(--dotti-muted)]">
+                      Custom
+                      <input
+                        type="color"
+                        value={selectedElement.color ?? '#d85d7d'}
+                        onChange={(event) => onChangeElement(selectedElement.id, { color: event.target.value }, true)}
+                        className="mt-2 h-9 w-full rounded-full border border-[var(--dotti-border)] bg-white p-1"
+                      />
+                    </label>
+                  </PopoverContent>
+                </Popover>
+              )}
+              <button type="button" aria-label="Flip" className="grid size-8 place-items-center rounded-full hover:bg-[var(--dotti-blush)]" onClick={() => onFlip('x')}>
+                <FlipHorizontal2 className="size-4" />
+              </button>
+              <button type="button" aria-label="Bring forward" className="grid size-8 place-items-center rounded-full hover:bg-[var(--dotti-blush)]" onClick={() => onLayer('forward')}>
+                <Layers className="size-4" />
+              </button>
+              <button type="button" aria-label="Send backward" className="grid size-8 place-items-center rounded-full hover:bg-[var(--dotti-blush)]" onClick={() => onLayer('backward')}>
+                <SendToBack className="size-4" />
+              </button>
+              <button type="button" aria-label="Delete" className="grid size-8 place-items-center rounded-full text-red-600 hover:bg-red-50" onClick={onDelete}>
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+            <span className="sr-only">Selected {selectedElement.assetName}</span>
+          </>
+        )}
       </div>
     </div>
   );

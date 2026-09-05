@@ -20,9 +20,12 @@ export function VIPAssetModal({
             <Crown className="size-6 text-[var(--dotti-brown)]" />
           </div>
           <DialogTitle className="text-2xl font-black">
-            This decoration is available for Dotti VIP members.
+            Unlock more ways to create
           </DialogTitle>
         </DialogHeader>
+        <p className="text-sm leading-6 text-[var(--dotti-muted)]">
+          Upgrade to Felti VIP to upload your own base images, decorations, and access exclusive design assets.
+        </p>
         <div className="flex justify-end gap-2">
           <Button variant="outline" className="rounded-full bg-white" onClick={() => onOpenChange(false)}>
             Maybe Later
