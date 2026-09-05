@@ -296,10 +296,11 @@ export async function POST(request: NextRequest) {
       const existing = await admin.from('profiles').select('id').eq('email', email).maybeSingle();
       if (existing.data) return response({ error: 'This email is already registered.' }, cookiesToSet, { status: 409 });
 
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { display_name: name } },
+        options: { data: { display_name: name }, emailRedirectTo: `${siteUrl}/login` },
       });
       if (error || !data.user) return response({ error: error?.message ?? 'Registration failed.' }, cookiesToSet, { status: 400 });
 
