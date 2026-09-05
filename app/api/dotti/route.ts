@@ -323,7 +323,7 @@ export async function POST(request: NextRequest) {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { display_name: name }, emailRedirectTo: `${siteUrl}/auth/callback?next=/account` },
+        options: { data: { display_name: name }, emailRedirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent('/account')}` },
       });
       if (error || !data.user) return response({ error: error?.message ?? 'Registration failed.' }, cookiesToSet, { status: 400 });
 
@@ -363,7 +363,7 @@ export async function POST(request: NextRequest) {
       if (!validateEmail(email)) return response({ error: 'Please enter a valid email address.' }, cookiesToSet, { status: 400 });
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/auth/callback?next=/login`,
+        redirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent('/login')}`,
       });
       if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
       return response({ ok: true }, cookiesToSet);
