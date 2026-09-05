@@ -180,15 +180,20 @@ export function DIYStudio() {
       try {
         const { user } = await dottiApi.me();
         setUser(user);
-        if (user?.role === 'vip') {
+        if (user?.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin')) {
           const { uploads } = await dottiApi.listUploads();
           setUploads(uploads);
+        } else {
+          setUploads([]);
         }
       } catch {
         setUser(null);
+        setUploads([]);
       }
     };
     void loadUserData();
+    const reloadUserData = () => void loadUserData();
+    window.addEventListener('dotti-storage', reloadUserData);
     dottiApi.getPricing().then(({ pricing }) => setPricing(pricing)).catch(() => setPricing(defaultPricingConfig));
     dottiApi.listOfficialAssets().then(({ assets }) => {
       const library = assets.map(officialAssetFromAdmin).filter(Boolean) as DottiAsset[];
@@ -206,7 +211,7 @@ export function DIYStudio() {
         setHistory([complete]);
         setHistoryIndex(0);
       }).catch(() => setLoginModalOpen(true));
-      return;
+      return () => window.removeEventListener('dotti-storage', reloadUserData);
     }
     const templateId = params.get('template');
     const template = galleryDesigns.find((item) => item.id === templateId);
@@ -235,13 +240,14 @@ export function DIYStudio() {
       setHistory([next]);
       setHistoryIndex(0);
     }
+    return () => window.removeEventListener('dotti-storage', reloadUserData);
   }, []);
 
   const selectedElement = useMemo(
     () => design.elements.find((element) => element.id === selectedElementId),
     [design.elements, selectedElementId],
   );
-  const canUseVIP = user?.role === 'vip';
+  const canUseVIP = user?.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
   const officialAssets = useMemo(
     () =>
       officialLibrary.map((asset) => ({

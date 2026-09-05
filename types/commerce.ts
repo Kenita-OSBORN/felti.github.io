@@ -34,6 +34,7 @@ export type GalleryDesign = {
 
 export type CartItem = {
   id: string;
+  itemType?: 'product' | 'design' | 'membership';
   productId?: string;
   designId?: string;
   productName: string;

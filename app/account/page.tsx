@@ -47,10 +47,11 @@ export default function AccountPage() {
     }
     setUser(user);
     setProfile(user);
+    const canUseVip = user.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
     const [{ designs }, { orders }, uploadResult] = await Promise.all([
       dottiApi.listDesigns(),
       dottiApi.listOrders(),
-      user.role === 'vip' ? dottiApi.listUploads() : Promise.resolve({ uploads: [] }),
+      canUseVip ? dottiApi.listUploads() : Promise.resolve({ uploads: [] }),
     ]);
     setDesigns(designs);
     setOrders(orders);
@@ -81,16 +82,10 @@ export default function AccountPage() {
     setMessage('');
     setJoiningVip(true);
     try {
-      const result = await dottiApi.upgradeVip();
-      if (result.user.role !== 'vip' || result.user.membershipStatus !== 'Active') {
-        throw new Error('VIP membership could not be activated. Please try again.');
-      }
-      setUser(result.user);
-      setProfile(result.user);
-      await refresh();
-      setMessage('Felti VIP is active.');
+      const { order } = await dottiApi.createVipOrder();
+      window.location.href = `/payment?order=${order.id}&purpose=vip`;
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'VIP membership could not be activated. Please try again.');
+      setError(error instanceof Error ? error.message : 'VIP checkout could not be started. Please try again.');
     } finally {
       setJoiningVip(false);
     }
@@ -158,9 +153,10 @@ export default function AccountPage() {
 
   const shippingAddress = { ...emptyAddress, ...(profile.shippingAddress ?? {}) };
   const openOrder = orders.find((order) => order.id === openOrderId);
+  const isVipActive = user.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
 
   return (
-    <PageShell title="My Felti" eyebrow={user.role === 'vip' ? 'VIP Member' : 'Registered User'}>
+    <PageShell title="My Felti" eyebrow={isVipActive ? 'VIP Member' : 'Registered User'}>
       <div className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]">
         <aside className="h-fit rounded-[32px] bg-white p-4 shadow-sm ring-1 ring-[var(--dotti-border)]">
           {menu.map((item) => (
@@ -177,7 +173,7 @@ export default function AccountPage() {
                   <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void uploadAvatar(event.target.files?.[0])} />
                 </label>
                 <div>
-                  <h2 className="text-2xl font-black">{user.name} {user.role === 'vip' && <Crown className="inline size-5 text-[var(--dotti-gold)]" />}</h2>
+                  <h2 className="text-2xl font-black">{user.name} {isVipActive && <Crown className="inline size-5 text-[var(--dotti-gold)]" />}</h2>
                   <p className="mt-1 text-[var(--dotti-muted)]">{user.email}</p>
                   <p className="mt-1 text-sm text-[var(--dotti-muted)]">Member since {user.memberSince}</p>
                 </div>
@@ -261,7 +257,7 @@ export default function AccountPage() {
           {active === 'My Uploads' && (
             <div>
               <h2 className="text-2xl font-black">My Uploads</h2>
-              {user.role !== 'vip' ? (
+              {!isVipActive ? (
                 <div className="mt-5 rounded-3xl bg-[var(--dotti-blush)] p-5 text-[var(--dotti-muted)]">My Uploads is a VIP creative feature.</div>
               ) : (
                 <div>
@@ -298,7 +294,7 @@ export default function AccountPage() {
             <div>
               <h2 className="text-2xl font-black">VIP Membership</h2>
               <p className="mt-3 text-[var(--dotti-muted)]">Felti VIP is ฿79 / month for creative tools, premium assets, and personal uploads. Physical production is still priced per design.</p>
-              {user.role === 'vip' ? (
+              {isVipActive ? (
                 <div className="mt-5 rounded-3xl bg-[var(--dotti-blush)] p-5 font-bold text-[var(--dotti-berry)]">
                   Your Felti VIP membership is active.
                 </div>

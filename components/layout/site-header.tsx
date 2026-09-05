@@ -78,6 +78,7 @@ export function SiteHeader() {
     sessionStorage.removeItem(cachedUserKey);
     window.location.href = '/';
   };
+  const isVipActive = user?.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
 
   return (
     <header className="sticky top-0 z-40 h-[var(--header-height)] border-b border-[var(--dotti-border)] bg-[rgba(255,251,246,0.88)] backdrop-blur-xl">
@@ -149,7 +150,7 @@ export function SiteHeader() {
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-[var(--dotti-blush)] text-sm font-black text-[var(--dotti-berry)]">
                   {user.avatarUrl ? <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" /> : user.name.slice(0, 1).toUpperCase()}
                 </span>
-                {user.role === 'vip' && <Crown className="size-4 text-[var(--dotti-gold)]" />}
+                {isVipActive && <Crown className="size-4 text-[var(--dotti-gold)]" />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 rounded-3xl border-[var(--dotti-border)] bg-white p-2">
                 {accountItems.map((item) => (

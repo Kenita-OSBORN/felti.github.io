@@ -28,6 +28,7 @@ export const dottiApi = {
   listOfficialAssets: () => call<{ assets: AdminAssetRow[] }>('listOfficialAssets'),
   updateProfile: (profile: Partial<DottiUser>) => call<{ user: DottiUser }>('updateProfile', { profile }),
   upgradeVip: () => call<{ user: DottiUser }>('upgradeVip'),
+  createVipOrder: () => call<{ order: Order }>('createVipOrder'),
   listDesigns: () => call<{ designs: DesignState[] }>('listDesigns'),
   saveDesign: (design: DesignState) => call<{ design: DesignState }>('saveDesign', { design }),
   getDesign: (id: string) => call<{ design: DesignState }>('getDesign', { id }),

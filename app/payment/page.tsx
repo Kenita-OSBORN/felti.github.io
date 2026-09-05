@@ -40,9 +40,12 @@ const paymentMethods: {
 export default function PaymentPage() {
   const [order, setOrder] = useState<Order | undefined>();
   const [method, setMethod] = useState<PaymentMethod>('card');
+  const [purpose, setPurpose] = useState('');
 
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('order');
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('order');
+    setPurpose(params.get('purpose') ?? '');
     if (!id) return;
     dottiApi.getOrder(id).then(({ order }) => setOrder(order)).catch(() => {
       window.location.href = '/account?tab=My%20Orders';
@@ -52,17 +55,25 @@ export default function PaymentPage() {
   const pay = async () => {
     if (!order) return;
     await dottiApi.pay(order.id);
+    if (isVipOrder(order) || purpose === 'vip') {
+      window.location.href = '/account?tab=VIP%20Membership&vip=active';
+      return;
+    }
     window.location.href = `/order-confirmation?order=${order.id}`;
   };
 
+  const vipOrder = isVipOrder(order);
+
   return (
-    <PageShell title="Payment" eyebrow="Mock Payment">
+    <PageShell title={vipOrder ? 'VIP Payment' : 'Payment'} eyebrow="Mock Payment">
       <div className="mt-8 grid max-w-5xl gap-5 rounded-[32px] bg-white p-5 shadow-sm ring-1 ring-[var(--dotti-border)] lg:grid-cols-[0.9fr_1.1fr] lg:p-6">
         <div className="rounded-[28px] bg-[var(--dotti-bg)] p-5">
-          <p className="text-sm font-black uppercase text-[var(--dotti-berry)]">Order</p>
+          <p className="text-sm font-black uppercase text-[var(--dotti-berry)]">{vipOrder ? 'Membership' : 'Order'}</p>
           <h2 className="mt-2 text-2xl font-black">{order ? order.orderNumber : 'No pending order'}</h2>
           <p className="mt-2 text-sm text-[var(--dotti-muted)]">
-            Demo payment completes the same Felti order workflow without storing raw card details.
+            {vipOrder
+              ? 'Complete demo payment to activate Felti VIP. Card details are not saved.'
+              : 'Demo payment completes the same Felti order workflow without storing raw card details.'}
           </p>
 
           <div className="mt-6 grid gap-3">
@@ -100,7 +111,7 @@ export default function PaymentPage() {
           </div>
 
           <Button onClick={() => void pay()} disabled={!order} className="mt-5 h-11 w-full rounded-full bg-[var(--dotti-berry)] text-white hover:bg-[var(--dotti-berry-dark)]">
-            Pay ฿{order?.total.toFixed(0) ?? '0'}
+            {vipOrder ? 'Pay and Activate VIP' : `Pay ฿${order?.total.toFixed(0) ?? '0'}`}
           </Button>
         </div>
 
@@ -112,6 +123,10 @@ export default function PaymentPage() {
       </div>
     </PageShell>
   );
+}
+
+function isVipOrder(order?: Order) {
+  return Boolean(order?.items.some((item) => item.itemType === 'membership' || item.productId === 'felti-vip-monthly'));
 }
 
 function QrPaymentPanel({ order }: { order?: Order }) {

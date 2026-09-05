@@ -13,7 +13,6 @@ export default function VIPPage() {
   const [user, setUser] = useState<DottiUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -26,28 +25,21 @@ export default function VIPPage() {
 
   const joinVip = async () => {
     setError('');
-    setMessage('');
     if (!user) {
       window.location.href = '/login?returnTo=/vip';
       return;
     }
     setJoining(true);
     try {
-      const result = await dottiApi.upgradeVip();
-      if (result.user.role !== 'vip' || result.user.membershipStatus !== 'Active') {
-        throw new Error('VIP membership could not be activated. Please try again.');
-      }
-      setUser(result.user);
-      setMessage('Felti VIP is active.');
-      window.setTimeout(() => {
-        window.location.href = '/account?tab=VIP%20Membership';
-      }, 500);
+      const { order } = await dottiApi.createVipOrder();
+      window.location.href = `/payment?order=${order.id}&purpose=vip`;
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'VIP membership could not be activated. Please try again.');
+      setError(error instanceof Error ? error.message : 'VIP checkout could not be started. Please try again.');
     } finally {
       setJoining(false);
     }
   };
+  const isVipActive = user?.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
 
   return (
     <PageShell title="Felti VIP Membership" eyebrow="Membership">
@@ -68,10 +60,9 @@ export default function VIPPage() {
           <ul className="mt-5 space-y-3">
             {membershipPlan.benefits.map((item) => <li key={item} className="rounded-2xl bg-white/10 px-4 py-3">{item}</li>)}
           </ul>
-          <Button disabled={loading || joining || user?.role === 'vip'} onClick={() => void joinVip()} className="mt-6 rounded-full bg-white px-6 text-[var(--dotti-ink)] hover:bg-[var(--dotti-cream)]">
-            {loading ? 'Checking...' : joining ? 'Joining...' : user?.role === 'vip' ? 'VIP Active' : 'Join VIP'}
+          <Button disabled={loading || joining || isVipActive} onClick={() => void joinVip()} className="mt-6 rounded-full bg-white px-6 text-[var(--dotti-ink)] hover:bg-[var(--dotti-cream)]">
+            {loading ? 'Checking...' : joining ? 'Opening payment...' : isVipActive ? 'VIP Active' : 'Join VIP'}
           </Button>
-          {message && <p className="mt-4 rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold text-white">{message}</p>}
           {error && <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
         </section>
       </div>

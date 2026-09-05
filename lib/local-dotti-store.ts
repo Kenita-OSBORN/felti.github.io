@@ -79,6 +79,16 @@ const dataDir = path.join(process.cwd(), '.dotti-data');
 const dbPath = path.join(dataDir, 'db.json');
 const sessionCookie = 'dotti_session';
 const sessionMaxAge = 60 * 60 * 24 * 30;
+const emptyShippingAddress: ShippingAddress = {
+  fullName: '',
+  email: '',
+  phone: '',
+  address: '',
+  district: '',
+  province: '',
+  postalCode: '',
+  country: '',
+};
 
 const emptyDb = (): LocalDb => ({
   users: [],
@@ -162,6 +172,22 @@ function verifyPassword(password: string, salt: string, expectedHash: string) {
   const actual = Buffer.from(hashPassword(password, salt).hash, 'hex');
   const expected = Buffer.from(expectedHash, 'hex');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function activateLocalVip(user: LocalUser, now: string) {
+  user.role = 'vip';
+  user.membershipStatus = 'Active';
+  user.subscriptionStart = now;
+  user.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  user.updatedAt = now;
+}
+
+function isVipMembershipOrder(order: Order) {
+  return order.items.some((item) => item.itemType === 'membership' || item.productId === 'felti-vip-monthly');
+}
+
+function canUseVipFeatures(user: LocalUser | DottiUser) {
+  return user.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
 }
 
 function userFromLocal(user: LocalUser): DottiUser {
@@ -339,7 +365,7 @@ function validateDesignPermission(db: LocalDb, user: LocalUser, design: DesignSt
     !!design.customBaseUrl ||
     design.background?.type === 'upload' ||
     design.elements.some((element) => element.source === 'premium' || element.source === 'upload' || element.productionPrice > 8);
-  if (usesVipFeature && user.role !== 'vip') return 'VIP membership is required for premium assets and personal uploads.';
+  if (usesVipFeature && !canUseVipFeatures(user)) return 'VIP membership is required for premium assets and personal uploads.';
 
   const uploadedAssetIds = design.elements.filter((element) => element.source === 'upload').map((element) => element.assetId);
   for (const assetId of uploadedAssetIds) {
@@ -532,13 +558,40 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
   }
 
   if (body.action === 'upgradeVip') {
-    user.role = 'vip';
-    user.membershipStatus = 'Active';
-    user.subscriptionStart = now;
-    user.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    user.updatedAt = now;
+    return json({ error: 'VIP membership is activated after payment.' }, { status: 400 });
+  }
+
+  if (body.action === 'createVipOrder') {
+    if (user.role === 'vip' && user.membershipStatus === 'Active') {
+      return json({ error: 'Your Felti VIP membership is already active.' }, { status: 400 });
+    }
+    const total = db.pricing?.vipMonthly ?? defaultPricingConfig.vipMonthly;
+    const order: Order = {
+      id: crypto.randomUUID(),
+      orderNumber: `FELTI-VIP-${Date.now().toString().slice(-8)}`,
+      orderDate: now.slice(0, 10),
+      items: [
+        {
+          id: crypto.randomUUID(),
+          itemType: 'membership',
+          productId: 'felti-vip-monthly',
+          productName: 'Felti VIP Monthly',
+          price: total,
+          quantity: 1,
+        },
+      ],
+      shippingAddress: { ...emptyShippingAddress, fullName: user.name, email: user.email, phone: user.phone },
+      subtotal: total,
+      shippingFee: 0,
+      discount: 0,
+      vipDiscount: 0,
+      total,
+      paymentStatus: 'Pending',
+      orderStatus: 'Pending',
+    };
+    db.orders.push({ id: order.id, userId: user.id, order });
     await writeDb(db);
-    return json({ user: userFromLocal(user) });
+    return json({ order });
   }
 
   if (body.action === 'listDesigns') {
@@ -587,12 +640,12 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
   }
 
   if (body.action === 'listUploads') {
-    if (user.role !== 'vip') return json({ error: 'VIP membership is required.' }, { status: 403 });
+    if (!canUseVipFeatures(user)) return json({ error: 'VIP membership is required.' }, { status: 403 });
     return json({ uploads: db.uploads.filter((upload) => upload.userId === user.id && upload.kind === 'decoration').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(uploadFromLocal) });
   }
 
   if (body.action === 'deleteUpload') {
-    if (user.role !== 'vip') return json({ error: 'VIP membership is required.' }, { status: 403 });
+    if (!canUseVipFeatures(user)) return json({ error: 'VIP membership is required.' }, { status: 403 });
     const uploadId = String(body.id ?? '');
     const upload = db.uploads.find((item) => item.id === uploadId && item.userId === user.id && item.kind === 'decoration');
     if (!upload) return json({ error: 'Upload not found.' }, { status: 404 });
@@ -602,7 +655,7 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
   }
 
   if (body.action === 'uploadAsset' || body.action === 'uploadBase' || body.action === 'uploadBackground') {
-    if (user.role !== 'vip') return json({ error: 'VIP membership is required.' }, { status: 403 });
+    if (!canUseVipFeatures(user)) return json({ error: 'VIP membership is required.' }, { status: 403 });
     const imageUrl = String(body.imageUrl ?? '');
     const image = parseDataImage(imageUrl);
     if ('error' in image) return json({ error: image.error }, { status: 400 });
@@ -676,6 +729,9 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
     if (order.order.paymentStatus !== 'Paid') {
       order.order.paymentStatus = 'Paid';
       order.order.orderStatus = 'Confirmed';
+      if (isVipMembershipOrder(order.order)) {
+        activateLocalVip(user, now);
+      }
       db.cartItems = db.cartItems.filter((item) => item.userId !== user.id);
       await writeDb(db);
     }

@@ -84,6 +84,10 @@ function userFromProfile(profile: ProfileRow): DottiUser {
   };
 }
 
+function canUseVipFeatures(user: DottiUser) {
+  return user.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
+}
+
 function orderFromRow(row: OrderRow): Order {
   return {
     id: row.id,
@@ -114,6 +118,35 @@ function uploadFromRow(row: UploadRow): DottiAsset {
     productionPrice: row.kind === 'base' ? 30 : 30,
     source: 'upload',
   };
+}
+
+const emptyShippingAddress: ShippingAddress = {
+  fullName: '',
+  email: '',
+  phone: '',
+  address: '',
+  district: '',
+  province: '',
+  postalCode: '',
+  country: '',
+};
+
+function isVipMembershipOrder(order: OrderRow | Order) {
+  return orderFromUnknownItems(order).some((item) => item.itemType === 'membership' || item.productId === 'felti-vip-monthly');
+}
+
+function orderFromUnknownItems(order: OrderRow | Order) {
+  return 'items_json' in order ? order.items_json : order.items;
+}
+
+async function activateVipMembership(admin: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
+  const start = new Date();
+  const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const { error } = await admin
+    .from('profiles')
+    .update({ role: 'vip', membership_status: 'Active', subscription_start: start.toISOString(), subscription_end: end.toISOString() })
+    .eq('id', userId);
+  if (error) throw new Error(error.message);
 }
 
 export async function GET(request: NextRequest) {
@@ -177,7 +210,7 @@ async function validateDesignPermission(admin: ReturnType<typeof createSupabaseA
     !!design.customBaseUrl ||
     design.background?.type === 'upload' ||
     design.elements.some((element) => element.source === 'premium' || element.source === 'upload' || element.productionPrice > 8);
-  if (usesVipFeature && user.role !== 'vip') return 'VIP membership is required for premium assets and personal uploads.';
+  if (usesVipFeature && !canUseVipFeatures(user)) return 'VIP membership is required for premium assets and personal uploads.';
 
   const uploadedAssetIds = design.elements.filter((element) => element.source === 'upload').map((element) => element.assetId);
   for (const assetId of uploadedAssetIds) {
@@ -432,14 +465,44 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.action === 'upgradeVip') {
-      const start = new Date();
-      const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      const { error } = await admin
-        .from('profiles')
-        .update({ role: 'vip', membership_status: 'Active', subscription_start: start.toISOString(), subscription_end: end.toISOString() })
-        .eq('id', user.id);
-      if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
-      return response({ user: await profileForUser(admin, user.id) }, cookiesToSet);
+      return response({ error: 'VIP membership is activated after payment.' }, cookiesToSet, { status: 400 });
+    }
+
+    if (body.action === 'createVipOrder') {
+      if (user.role === 'vip' && user.membershipStatus === 'Active') {
+        return response({ error: 'Your Felti VIP membership is already active.' }, cookiesToSet, { status: 400 });
+      }
+      const { data: pricingRow } = await admin.from('pricing').select('config_json').eq('id', 'current').maybeSingle<{ config_json: PricingConfig }>();
+      const pricing = { ...defaultPricingConfig, ...(pricingRow?.config_json ?? {}) };
+      const total = pricing.vipMonthly;
+      const orderNumber = `FELTI-VIP-${Date.now().toString().slice(-8)}`;
+      const item: CartItem = {
+        id: crypto.randomUUID(),
+        itemType: 'membership',
+        productId: 'felti-vip-monthly',
+        productName: 'Felti VIP Monthly',
+        price: total,
+        quantity: 1,
+      };
+      const insert = await admin
+        .from('orders')
+        .insert({
+          user_id: user.id,
+          order_number: orderNumber,
+          items_json: [item],
+          address_json: { ...emptyShippingAddress, fullName: user.name, email: user.email, phone: user.phone ?? '' },
+          subtotal: total,
+          shipping_fee: 0,
+          discount: 0,
+          vip_discount: 0,
+          total,
+          payment_status: 'Pending',
+          order_status: 'Pending',
+        })
+        .select('*')
+        .single<OrderRow>();
+      if (insert.error || !insert.data) return response({ error: insert.error?.message ?? 'VIP checkout failed.' }, cookiesToSet, { status: 400 });
+      return response({ order: orderFromRow(insert.data) }, cookiesToSet);
     }
 
     if (body.action === 'listDesigns') {
@@ -499,14 +562,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.action === 'listUploads') {
-      if (user.role !== 'vip') return response({ error: 'VIP membership is required.' }, cookiesToSet, { status: 403 });
+      if (!canUseVipFeatures(user)) return response({ error: 'VIP membership is required.' }, cookiesToSet, { status: 403 });
       const { data, error } = await admin.from('uploads').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
       if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
       return response({ uploads: ((data ?? []) as UploadRow[]).filter((row) => row.kind === 'decoration').map(uploadFromRow) }, cookiesToSet);
     }
 
     if (body.action === 'deleteUpload') {
-      if (user.role !== 'vip') return response({ error: 'VIP membership is required.' }, cookiesToSet, { status: 403 });
+      if (!canUseVipFeatures(user)) return response({ error: 'VIP membership is required.' }, cookiesToSet, { status: 403 });
       const uploadId = String(body.id ?? '');
       const { data: upload, error } = await admin
         .from('uploads')
@@ -525,7 +588,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.action === 'uploadAsset' || body.action === 'uploadBase' || body.action === 'uploadBackground') {
-      if (user.role !== 'vip') return response({ error: 'VIP membership is required.' }, cookiesToSet, { status: 403 });
+      if (!canUseVipFeatures(user)) return response({ error: 'VIP membership is required.' }, cookiesToSet, { status: 403 });
       const image = parseDataImage(String(body.imageUrl ?? ''));
       if ('error' in image) return response({ error: image.error }, cookiesToSet, { status: 400 });
       const kind = body.action === 'uploadBase' ? 'base' : body.action === 'uploadBackground' ? 'background' : 'decoration';
@@ -619,6 +682,9 @@ export async function POST(request: NextRequest) {
       if (existing.data.payment_status !== 'Paid') {
         const paid = await admin.from('orders').update({ payment_status: 'Paid', order_status: 'Confirmed' }).eq('id', orderId).eq('user_id', user.id);
         if (paid.error) return response({ error: paid.error.message }, cookiesToSet, { status: 400 });
+        if (isVipMembershipOrder(existing.data)) {
+          await activateVipMembership(admin, user.id);
+        }
         await admin.from('cart_items').delete().eq('user_id', user.id);
       }
       const { data } = await admin.from('orders').select('*').eq('id', orderId).eq('user_id', user.id).single<OrderRow>();
