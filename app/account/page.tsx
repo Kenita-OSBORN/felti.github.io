@@ -34,8 +34,10 @@ export default function AccountPage() {
   const [active, setActive] = useState('My Profile');
   const [profile, setProfile] = useState<Partial<DottiUser>>({});
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [joiningVip, setJoiningVip] = useState(false);
 
   const refresh = async () => {
     const { user } = await dottiApi.me();
@@ -67,10 +69,31 @@ export default function AccountPage() {
   };
 
   const saveProfile = async () => {
+    setError('');
     const { user } = await dottiApi.updateProfile(profile);
     setUser(user);
     setProfile(user);
     setMessage('Profile saved.');
+  };
+
+  const joinVip = async () => {
+    setError('');
+    setMessage('');
+    setJoiningVip(true);
+    try {
+      const result = await dottiApi.upgradeVip();
+      if (result.user.role !== 'vip' || result.user.membershipStatus !== 'Active') {
+        throw new Error('VIP membership could not be activated. Please try again.');
+      }
+      setUser(result.user);
+      setProfile(result.user);
+      await refresh();
+      setMessage('Felti VIP is active.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'VIP membership could not be activated. Please try again.');
+    } finally {
+      setJoiningVip(false);
+    }
   };
 
   const uploadAvatar = async (file: File | undefined) => {
@@ -275,7 +298,17 @@ export default function AccountPage() {
             <div>
               <h2 className="text-2xl font-black">VIP Membership</h2>
               <p className="mt-3 text-[var(--dotti-muted)]">Felti VIP is ฿79 / month for creative tools, premium assets, and personal uploads. Physical production is still priced per design.</p>
-              {user.role !== 'vip' && <Button onClick={() => dottiApi.upgradeVip().then(() => refresh())} className="mt-5 rounded-full bg-[var(--dotti-berry)] text-white hover:bg-[var(--dotti-berry-dark)]">Join VIP</Button>}
+              {user.role === 'vip' ? (
+                <div className="mt-5 rounded-3xl bg-[var(--dotti-blush)] p-5 font-bold text-[var(--dotti-berry)]">
+                  Your Felti VIP membership is active.
+                </div>
+              ) : (
+                <Button disabled={joiningVip} onClick={() => void joinVip()} className="mt-5 rounded-full bg-[var(--dotti-berry)] text-white hover:bg-[var(--dotti-berry-dark)]">
+                  {joiningVip ? 'Joining...' : 'Join VIP'}
+                </Button>
+              )}
+              {message && <p className="mt-3 text-sm font-bold text-[var(--dotti-success)]">{message}</p>}
+              {error && <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{error}</p>}
             </div>
           )}
 
