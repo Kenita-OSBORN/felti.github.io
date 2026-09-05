@@ -237,6 +237,29 @@ async function profileForUser(admin: ReturnType<typeof createSupabaseAdminClient
   return userFromProfile(data);
 }
 
+async function ensureProfileForAuthUser(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  input: { userId: string; email: string; name: string; role?: DottiUser['role']; membershipStatus?: DottiUser['membershipStatus'] },
+) {
+  const { data: authData, error: authError } = await admin.auth.admin.getUserById(input.userId);
+  if (authError || !authData.user) {
+    throw new Error('Registration could not be completed. Please try again with a new email or delete the pending Auth user in Supabase.');
+  }
+  const authEmail = String(authData.user.email ?? '').trim().toLowerCase();
+  if (authEmail && authEmail !== input.email) {
+    throw new Error('This email is already registered or pending verification. Please log in, reset the password, or delete the old Auth user in Supabase.');
+  }
+  const { error } = await admin.from('profiles').upsert({
+    id: input.userId,
+    email: input.email,
+    name: input.name,
+    role: input.role ?? 'registered',
+    membership_status: input.membershipStatus ?? 'None',
+  });
+  if (error) throw new Error(error.message);
+  return profileForUser(admin, input.userId);
+}
+
 async function currentUser(request: NextRequest, cookiesToSet: Parameters<typeof applySupabaseCookies>[1]) {
   const supabase = createSupabaseRouteClient(request, cookiesToSet);
   const { data, error } = await supabase.auth.getUser();
@@ -311,16 +334,15 @@ export async function POST(request: NextRequest) {
       const allowLocalTestRoles = process.env.NODE_ENV !== 'production' && !process.env.VERCEL;
       const isAdminTest = allowLocalTestRoles && (email === 'admin@felti.test' || email === 'admin@dotti.test');
       const isVipTest = allowLocalTestRoles && (email === 'vip@felti.test' || email === 'vip@dotti.test');
-      const { error: profileError } = await admin.from('profiles').upsert({
-        id: data.user.id,
+      const profile = await ensureProfileForAuthUser(admin, {
+        userId: data.user.id,
         email,
         name,
         role: isAdminTest ? 'admin' : isVipTest ? 'vip' : 'registered',
-        membership_status: isAdminTest || isVipTest ? 'Active' : 'None',
+        membershipStatus: isAdminTest || isVipTest ? 'Active' : 'None',
       });
-      if (profileError) return response({ error: profileError.message }, cookiesToSet, { status: 400 });
 
-      return response({ user: await profileForUser(admin, data.user.id) }, cookiesToSet);
+      return response({ user: profile }, cookiesToSet);
     }
 
     if (body.action === 'login') {
@@ -328,7 +350,12 @@ export async function POST(request: NextRequest) {
       const password = String(body.password ?? '');
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error || !data.user) return response({ error: 'Incorrect email or password.' }, cookiesToSet, { status: 401 });
-      return response({ user: await profileForUser(admin, data.user.id) }, cookiesToSet);
+      try {
+        return response({ user: await profileForUser(admin, data.user.id) }, cookiesToSet);
+      } catch {
+        const name = String(data.user.user_metadata?.display_name ?? data.user.email?.split('@')[0] ?? 'Felti friend');
+        return response({ user: await ensureProfileForAuthUser(admin, { userId: data.user.id, email, name }) }, cookiesToSet);
+      }
     }
 
     if (body.action === 'resetPassword') {
