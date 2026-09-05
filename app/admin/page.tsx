@@ -244,10 +244,10 @@ export default function AdminPage() {
           {active === 'Users' && (
             <div className="mt-5 space-y-4">
               <FilterBar values={userFilters} value={userFilter} onChange={setUserFilter} />
-              <AdminTable title="Registered Users" headers={['User', 'Email', 'Joined', 'Role', 'Membership', 'Designs', 'Orders', 'Spending', 'Action']}>
+              <AdminTable title="Registered Users" headers={['User', 'Email', 'Password', 'Joined', 'Role', 'Membership', 'Designs', 'Orders', 'Spending', 'Action']}>
                 {filteredUsers.map((item) => (
                   <tr key={item.id}>
-                    <td className="font-bold">{item.name}</td><td>{item.email}</td><td>{item.memberSince}</td><td>{item.role}</td><td>{item.membershipStatus}</td><td>{item.designCount}</td><td>{item.orderCount}</td><td>฿{item.totalSpending.toFixed(0)}</td>
+                    <td className="font-bold">{item.name}</td><td>{item.email}</td><td><Badge>Protected</Badge></td><td>{item.memberSince}</td><td>{item.role}</td><td>{item.membershipStatus}</td><td>{item.designCount}</td><td>{item.orderCount}</td><td>฿{item.totalSpending.toFixed(0)}</td>
                     <td><Button size="sm" variant="outline" className="rounded-full bg-white" onClick={() => void updateUser(item, { role: item.role === 'vip' ? 'registered' : 'vip', membershipStatus: item.role === 'vip' ? 'None' : 'Active' })}>{item.role === 'vip' ? 'Set Free' : 'Set VIP'}</Button></td>
                   </tr>
                 ))}
@@ -318,7 +318,7 @@ export default function AdminPage() {
               <div className="space-y-3">
                 {admin.products.filter((product) => product.name.toLowerCase().includes(query.toLowerCase()) || product.category.toLowerCase().includes(query.toLowerCase())).map((product) => (
                   <div key={product.id} className="grid gap-3 rounded-3xl bg-[var(--dotti-bg)] p-4 md:grid-cols-[80px_1fr_auto]">
-                    <ProductArt assetIds={product.assetIds} />
+                    <ProductArt assetIds={product.assetIds} imageUrl={product.imageUrl} alt={product.name} />
                     <div><b>{product.name}</b><p className="text-sm text-[var(--dotti-muted)]">฿{product.price} · Stock {product.stock} · {product.category} · {product.active ? 'Active' : 'Inactive'}</p></div>
                     <Button variant="outline" className="rounded-full bg-white" onClick={() => setProductForm(product)}>Edit</Button>
                   </div>
@@ -432,13 +432,25 @@ function PricingForm({ pricing, setPricing, onSave }: { pricing: PricingConfig; 
 }
 
 function ProductForm({ product, setProduct, onSave }: { product: Product; setProduct: (product: Product) => void; onSave: () => void }) {
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setProduct({ ...product, imageUrl: await fileToDataUrl(file) });
+  };
   return (
     <aside className="rounded-[24px] bg-[var(--dotti-bg)] p-5">
       <h3 className="text-xl font-black">{product.id ? 'Edit Product' : 'Add Product'}</h3>
+      {product.imageUrl ? (
+        <img src={product.imageUrl} alt="" className="mt-4 aspect-square w-full rounded-3xl bg-white object-cover" />
+      ) : (
+        <ProductArt assetIds={product.assetIds} className="mt-4" />
+      )}
       <div className="mt-4 grid gap-3">
         <Input className="rounded-full bg-white" placeholder="Product name" value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} />
         <Textarea className="rounded-3xl bg-white" placeholder="Description" value={product.description} onChange={(event) => setProduct({ ...product, description: event.target.value })} />
+        <label className="rounded-full bg-white px-4 py-2 text-sm font-black">Upload Product Image<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void upload(event.target.files?.[0])} /></label>
         <Input className="rounded-full bg-white" placeholder="Category" value={product.category} onChange={(event) => setProduct({ ...product, category: event.target.value })} />
+        <Input className="rounded-full bg-white" placeholder="Material" value={product.material} onChange={(event) => setProduct({ ...product, material: event.target.value })} />
+        <Input className="rounded-full bg-white" placeholder="Asset IDs, comma separated" value={product.assetIds.join(', ')} onChange={(event) => setProduct({ ...product, assetIds: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} />
         <Input className="rounded-full bg-white" type="number" placeholder="Price" value={product.price} onChange={(event) => setProduct({ ...product, price: Number(event.target.value) })} />
         <Input className="rounded-full bg-white" type="number" placeholder="Stock" value={product.stock} onChange={(event) => setProduct({ ...product, stock: Number(event.target.value) })} />
         <label className="flex items-center gap-2 text-sm font-black"><input type="checkbox" checked={product.active} onChange={(event) => setProduct({ ...product, active: event.target.checked })} /> Active</label>

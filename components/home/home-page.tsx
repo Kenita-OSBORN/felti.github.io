@@ -1,6 +1,7 @@
 'use client';
 
 import { Heart, Paintbrush, PackageCheck, Shapes, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import { AccessoryPreview } from '@/components/home/accessory-preview';
 import { SiteHeader } from '@/components/layout/site-header';
@@ -8,8 +9,16 @@ import { SiteFooter } from '@/components/layout/site-footer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { galleryDesigns, products } from '@/data/mock-commerce';
+import { dottiApi } from '@/lib/dotti-api';
+import type { Product } from '@/types/commerce';
 
 export function HomePage() {
+  const [featuredProducts, setFeaturedProducts] = useState<Product[]>(products);
+
+  useEffect(() => {
+    dottiApi.listProducts().then(({ products }) => setFeaturedProducts(products)).catch(() => setFeaturedProducts(products));
+  }, []);
+
   return (
     <main className="min-h-screen bg-[var(--dotti-bg)] text-[var(--dotti-ink)]">
       <SiteHeader />
@@ -122,10 +131,14 @@ export function HomePage() {
               <Button render={<a href="/shop" />} variant="ghost" className="rounded-full text-[var(--dotti-berry)]">Shop All →</Button>
             </div>
             <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-4">
-              {products.slice(0, 4).map((product) => (
+              {featuredProducts.slice(0, 4).map((product) => (
                 <Card key={product.id} className="rounded-[28px] border-[var(--dotti-border)] bg-white shadow-sm">
                   <CardContent className="p-6">
-                    <AccessoryPreview assetIds={product.assetIds} className="max-w-[250px]" assetClassName="h-[78px] w-[78px]" />
+                    {product.imageUrl ? (
+                      <img src={product.imageUrl} alt={product.name} className="aspect-square w-full rounded-[28px] bg-[var(--dotti-felt)] object-cover" />
+                    ) : (
+                      <AccessoryPreview assetIds={product.assetIds} className="max-w-[250px]" assetClassName="h-[78px] w-[78px]" />
+                    )}
                     <h3 className="mt-6 text-lg font-black">{product.name}</h3>
                     <p className="mt-2 text-base font-black text-[var(--dotti-berry)]">฿{product.price}</p>
                     <div className="mt-5">

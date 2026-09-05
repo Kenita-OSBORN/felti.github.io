@@ -1,9 +1,17 @@
 import { dottiAssets } from '@/data/assets';
 
-export function ProductArt({ assetIds, className = '' }: { assetIds: string[]; className?: string }) {
+export function ProductArt({ assetIds, imageUrl, alt = '', className = '' }: { assetIds: string[]; imageUrl?: string; alt?: string; className?: string }) {
   const assets = assetIds
     .map((id) => dottiAssets.find((asset) => asset.id === id))
     .filter(Boolean);
+
+  if (imageUrl) {
+    return (
+      <div className={`felt-surface relative aspect-square overflow-hidden rounded-[28px] bg-[var(--dotti-felt)] shadow-inner ${className}`}>
+        <img src={imageUrl} alt={alt} className="h-full w-full object-cover" />
+      </div>
+    );
+  }
 
   return (
     <div className={`felt-surface relative aspect-square rounded-[28px] bg-[var(--dotti-felt)] shadow-inner ${className}`}>

@@ -11,7 +11,7 @@ async function call<T>(action: string, payload: Record<string, unknown> = {}) {
   });
   const data = (await response.json()) as ApiResult<T>;
   if (!response.ok) throw new Error(data.error ?? 'Felti request failed.');
-  if (!['me', 'getPricing', 'listOfficialAssets', 'adminDashboard', 'getCart', 'listDesigns', 'getDesign', 'listUploads', 'listOrders', 'getOrder'].includes(action)) {
+  if (!['me', 'getPricing', 'listProducts', 'listOfficialAssets', 'adminDashboard', 'getCart', 'listDesigns', 'getDesign', 'listUploads', 'listOrders', 'getOrder'].includes(action)) {
     window.dispatchEvent(new Event('dotti-storage'));
   }
   return data;
@@ -25,6 +25,7 @@ export const dottiApi = {
   logout: () => call<{ ok: true }>('logout'),
   me: () => call<{ user: DottiUser | null }>('me'),
   getPricing: () => call<{ pricing: PricingConfig }>('getPricing'),
+  listProducts: () => call<{ products: Product[] }>('listProducts'),
   listOfficialAssets: () => call<{ assets: AdminAssetRow[] }>('listOfficialAssets'),
   updateProfile: (profile: Partial<DottiUser>) => call<{ user: DottiUser }>('updateProfile', { profile }),
   upgradeVip: () => call<{ user: DottiUser }>('upgradeVip'),

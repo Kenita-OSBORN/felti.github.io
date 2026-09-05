@@ -6,7 +6,7 @@ import { applySupabaseCookies, createSupabaseAdminClient, createSupabaseRouteCli
 import { hasSupabaseEnv } from '@/lib/supabase/env';
 import { pricedDottiAssets } from '@/data/assets';
 import { products as seedProducts } from '@/data/mock-commerce';
-import type { AdminDashboardData, CartItem, DottiUser, Order, PricingConfig, ShippingAddress } from '@/types/commerce';
+import type { AdminDashboardData, CartItem, DottiUser, Order, PricingConfig, Product, ShippingAddress } from '@/types/commerce';
 import type { DesignState, DottiAsset } from '@/types/dotti';
 
 export const runtime = 'nodejs';
@@ -57,6 +57,11 @@ type OrderRow = {
   tracking_number: string | null;
   created_at: string;
 };
+type ProductRow = {
+  id: string;
+  product_json: Product;
+  active: boolean;
+};
 
 function validateEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -86,6 +91,37 @@ function userFromProfile(profile: ProfileRow): DottiUser {
 
 function canUseVipFeatures(user: DottiUser) {
   return user.membershipStatus === 'Active' && (user.role === 'vip' || user.role === 'admin');
+}
+
+function pricingFormInput(pricing: PricingConfig): PricingConfig {
+  return {
+    base: {
+      S: Number(pricing?.base?.S ?? defaultPricingConfig.base.S),
+      M: Number(pricing?.base?.M ?? defaultPricingConfig.base.M),
+      L: Number(pricing?.base?.L ?? defaultPricingConfig.base.L),
+    },
+    standardDecoration: Number(pricing?.standardDecoration ?? defaultPricingConfig.standardDecoration),
+    premiumDecoration: Number(pricing?.premiumDecoration ?? defaultPricingConfig.premiumDecoration),
+    customDecoration: Number(pricing?.customDecoration ?? defaultPricingConfig.customDecoration),
+    customBase: Number(pricing?.customBase ?? defaultPricingConfig.customBase),
+    detachableDecoration: Number(pricing?.detachableDecoration ?? defaultPricingConfig.detachableDecoration),
+    vipMonthly: Number(pricing?.vipMonthly ?? defaultPricingConfig.vipMonthly),
+  };
+}
+
+function normalizeProduct(product: Product): Product {
+  return {
+    id: String(product.id || crypto.randomUUID()),
+    name: String(product.name ?? '').trim() || 'Untitled Product',
+    description: String(product.description ?? '').trim(),
+    imageUrl: product.imageUrl ? String(product.imageUrl) : undefined,
+    price: Number(product.price ?? 0),
+    stock: Number(product.stock ?? 0),
+    category: String(product.category ?? '').trim() || 'Brooches',
+    material: String(product.material ?? '').trim() || 'Wool felt',
+    active: product.active !== false,
+    assetIds: Array.isArray(product.assetIds) ? product.assetIds.map(String) : [],
+  };
 }
 
 function orderFromRow(row: OrderRow): Order {
@@ -147,6 +183,15 @@ async function activateVipMembership(admin: ReturnType<typeof createSupabaseAdmi
     .update({ role: 'vip', membership_status: 'Active', subscription_start: start.toISOString(), subscription_end: end.toISOString() })
     .eq('id', userId);
   if (error) throw new Error(error.message);
+}
+
+async function listProducts(admin: ReturnType<typeof createSupabaseAdminClient>, includeInactive = false) {
+  let query = admin.from('products').select('id, product_json, active').order('updated_at', { ascending: false });
+  if (!includeInactive) query = query.eq('active', true);
+  const { data, error } = await query;
+  if (error) return seedProducts;
+  const products = ((data ?? []) as ProductRow[]).map((row) => ({ ...row.product_json, id: row.id, active: row.active }));
+  return products.length ? products : seedProducts;
 }
 
 export async function GET(request: NextRequest) {
@@ -303,7 +348,14 @@ export async function POST(request: NextRequest) {
 
     if (body.action === 'me') return response({ user: await currentUser(request, cookiesToSet) }, cookiesToSet);
 
-    if (body.action === 'getPricing') return response({ pricing: defaultPricingConfig }, cookiesToSet);
+    if (body.action === 'getPricing') {
+      const { data } = await admin.from('pricing').select('config_json').eq('id', 'current').maybeSingle<{ config_json: PricingConfig }>();
+      return response({ pricing: { ...defaultPricingConfig, ...(data?.config_json ?? {}) } }, cookiesToSet);
+    }
+
+    if (body.action === 'listProducts') {
+      return response({ products: await listProducts(admin) }, cookiesToSet);
+    }
 
     if (body.action === 'listOfficialAssets') {
       return response({
@@ -326,11 +378,13 @@ export async function POST(request: NextRequest) {
     if (String(body.action).startsWith('admin')) {
       if (user.role !== 'admin') return response({ error: 'Admin access required.' }, cookiesToSet, { status: 403 });
 
-      const [{ data: profileRows, error: profilesError }, { data: orderRows, error: ordersError }, { data: designRows, error: designsError }, { data: uploadRows }] = await Promise.all([
+      const [{ data: profileRows, error: profilesError }, { data: orderRows, error: ordersError }, { data: designRows, error: designsError }, { data: uploadRows }, productRowsResult, pricingResult] = await Promise.all([
         admin.from('profiles').select('*').order('created_at', { ascending: false }),
         admin.from('orders').select('*').order('created_at', { ascending: false }),
         admin.from('designs').select('id,user_id,name,design_json,preview_image,created_at,updated_at').order('updated_at', { ascending: false }),
         admin.from('uploads').select('*').order('created_at', { ascending: false }),
+        admin.from('products').select('id, product_json, active').order('updated_at', { ascending: false }),
+        admin.from('pricing').select('config_json').eq('id', 'current').maybeSingle<{ config_json: PricingConfig }>(),
       ]);
       if (profilesError) return response({ error: profilesError.message }, cookiesToSet, { status: 400 });
       if (ordersError) return response({ error: ordersError.message }, cookiesToSet, { status: 400 });
@@ -359,6 +413,25 @@ export async function POST(request: NextRequest) {
           })
           .eq('id', String(body.userId));
         if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+      }
+
+      if (body.action === 'adminUpdatePricing') {
+        const pricing = pricingFormInput(body.pricing as PricingConfig);
+        const { error } = await admin.from('pricing').upsert({ id: 'current', config_json: pricing, updated_at: new Date().toISOString() });
+        if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+        return response({ pricing }, cookiesToSet);
+      }
+
+      if (body.action === 'adminSaveProduct') {
+        const product = normalizeProduct(body.product as Product);
+        const { error } = await admin.from('products').upsert({
+          id: product.id,
+          product_json: product,
+          active: product.active,
+          updated_at: new Date().toISOString(),
+        });
+        if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+        return response({ products: await listProducts(admin, true) }, cookiesToSet);
       }
 
       const profiles = ((profileRows ?? []) as ProfileRow[]).map(userFromProfile);
@@ -392,6 +465,11 @@ export async function POST(request: NextRequest) {
         };
       });
       const paidOrders = orders.filter((order) => order.paymentStatus === 'Paid');
+      const productRows = productRowsResult.error ? [] : ((productRowsResult.data ?? []) as ProductRow[]);
+      const products = productRows.length
+        ? productRows.map((row) => ({ ...row.product_json, id: row.id, active: row.active }))
+        : seedProducts;
+      const pricing = { ...defaultPricingConfig, ...(pricingResult.data?.config_json ?? {}) };
       const adminData: AdminDashboardData = {
         stats: {
           totalUsers: users.length,
@@ -417,8 +495,8 @@ export async function POST(request: NextRequest) {
           colorEditable: Boolean(asset.colorEditable),
           active: true,
         })),
-        pricing: defaultPricingConfig,
-        products: seedProducts,
+        pricing,
+        products,
         memberships: users.filter((item) => item.role === 'vip' || item.role === 'admin' || item.membershipStatus !== 'None'),
       };
       return response({ admin: adminData }, cookiesToSet);

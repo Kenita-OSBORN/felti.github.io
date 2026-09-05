@@ -451,6 +451,10 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
 
   if (body.action === 'getPricing') return json({ pricing: db.pricing ?? defaultPricingConfig });
 
+  if (body.action === 'listProducts') {
+    return json({ products: (db.products ?? seedProducts).filter((product) => product.active) });
+  }
+
   if (body.action === 'listOfficialAssets') {
     return json({ assets: officialAssetsForAdmin(db).filter((asset) => asset.active) });
   }
