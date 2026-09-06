@@ -41,28 +41,37 @@ export default function AdminOrderDetailPage() {
   const [order, setOrder] = useState<AdminDashboardData['orders'][number] | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    dottiApi.adminDashboard()
-      .then(({ admin }) => {
-        const found = admin.orders.find((item) => item.id === params.id);
-        if (found) setOrder(found);
-        else setError('Order not found.');
+    setError('');
+    dottiApi.adminGetOrder(params.id)
+      .then(({ order: found }) => {
+        setOrder(found);
       })
-      .catch(() => setError('Admin access required.'));
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : 'Admin access required.'));
   }, [params.id]);
 
   const save = async () => {
     if (!order) return;
-    const { order: updated } = await dottiApi.adminUpdateOrder({
-      orderId: order.id,
-      paymentStatus: order.paymentStatus,
-      orderStatus: order.orderStatus,
-      trackingCompany: order.trackingCompany,
-      trackingNumber: order.trackingNumber,
-    });
-    setOrder(updated);
-    setMessage('Order saved. Customer order history now shows the updated status and tracking.');
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const { order: updated } = await dottiApi.adminUpdateOrder({
+        orderId: order.id,
+        paymentStatus: order.paymentStatus,
+        orderStatus: order.orderStatus,
+        trackingCompany: order.trackingCompany,
+        trackingNumber: order.trackingNumber,
+      });
+      setOrder(updated);
+      setMessage('Order saved. Customer order history now shows the updated status and tracking.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Order could not be saved.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (error || !order) {
@@ -91,6 +100,7 @@ export default function AdminOrderDetailPage() {
         </div>
       </div>
       {message && <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">{message}</p>}
+      {error && <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_420px]">
         <section className="space-y-5">
@@ -158,7 +168,7 @@ export default function AdminOrderDetailPage() {
             <div className="mt-2 flex justify-between"><span>Discount</span><b>฿{order.discount.toFixed(0)}</b></div>
             <div className="mt-3 flex justify-between border-t border-[var(--dotti-border)] pt-3 text-lg"><span>Total</span><b>฿{order.total.toFixed(0)}</b></div>
           </div>
-          <Button onClick={save} className="mt-5 w-full rounded-full bg-[var(--dotti-berry)] text-white"><Save className="size-4" /> Save Order</Button>
+          <Button onClick={save} disabled={saving} className="mt-5 w-full rounded-full bg-[var(--dotti-berry)] text-white"><Save className="size-4" /> {saving ? 'Saving...' : 'Save Order'}</Button>
         </aside>
       </div>
     </PageShell>

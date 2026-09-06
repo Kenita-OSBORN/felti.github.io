@@ -467,6 +467,11 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
 
     if (body.action === 'adminDashboard') return json({ admin: buildAdminDashboard(db) });
 
+    if (body.action === 'adminGetOrder') {
+      const order = buildAdminDashboard(db).orders.find((item) => item.id === String(body.orderId));
+      return order ? json({ order }) : json({ error: 'Order not found.' }, { status: 404 });
+    }
+
     if (body.action === 'adminUpdateOrder') {
       const order = db.orders.find((item) => item.id === String(body.orderId));
       if (!order) return json({ error: 'Order not found.' }, { status: 404 });

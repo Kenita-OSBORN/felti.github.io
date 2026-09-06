@@ -187,6 +187,16 @@ function orderFromRow(row: OrderRow): Order {
   };
 }
 
+function adminOrderFromRow(row: OrderRow, profiles: DottiUser[]): AdminDashboardData['orders'][number] {
+  const customer = profiles.find((profile) => profile.id === row.user_id);
+  return {
+    ...orderFromRow(row),
+    customerName: customer?.name ?? 'Unknown customer',
+    customerEmail: customer?.email ?? '',
+    customerPhone: customer?.phone ?? '',
+  };
+}
+
 async function uploadFromRow(admin: ReturnType<typeof createSupabaseAdminClient>, row: UploadRow): Promise<DottiAsset> {
   return {
     id: row.id,
@@ -514,16 +524,32 @@ export async function POST(request: NextRequest) {
       if (profilesError) return response({ error: profilesError.message }, cookiesToSet, { status: 400 });
       if (ordersError) return response({ error: ordersError.message }, cookiesToSet, { status: 400 });
       if (designsError) return response({ error: designsError.message }, cookiesToSet, { status: 400 });
+      const profiles = ((profileRows ?? []) as ProfileRow[]).map(userFromProfile);
+
+      if (body.action === 'adminGetOrder') {
+        const orderId = String(body.orderId ?? '').trim();
+        if (!orderId) return response({ error: 'Missing order ID.' }, cookiesToSet, { status: 400 });
+        const { data, error } = await admin.from('orders').select('*').eq('id', orderId).maybeSingle<OrderRow>();
+        if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+        return data
+          ? response({ order: adminOrderFromRow(data, profiles) }, cookiesToSet)
+          : response({ error: 'Order not found.' }, cookiesToSet, { status: 404 });
+      }
 
       if (body.action === 'adminUpdateOrder') {
-        const update = {
-          payment_status: body.paymentStatus as Order['paymentStatus'] | undefined,
-          order_status: body.orderStatus as Order['orderStatus'] | undefined,
+        const orderId = String(body.orderId ?? '').trim();
+        if (!orderId) return response({ error: 'Missing order ID.' }, cookiesToSet, { status: 400 });
+        const update: Partial<OrderRow> = {
           tracking_company: body.trackingCompany ? String(body.trackingCompany) : null,
           tracking_number: body.trackingNumber ? String(body.trackingNumber) : null,
         };
-        const { error } = await admin.from('orders').update(update).eq('id', String(body.orderId));
+        if (body.paymentStatus) update.payment_status = body.paymentStatus as Order['paymentStatus'];
+        if (body.orderStatus) update.order_status = body.orderStatus as Order['orderStatus'];
+        const { data, error } = await admin.from('orders').update(update).eq('id', orderId).select('*').maybeSingle<OrderRow>();
         if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+        return data
+          ? response({ order: adminOrderFromRow(data, profiles) }, cookiesToSet)
+          : response({ error: 'Order not found.' }, cookiesToSet, { status: 404 });
       }
 
       if (body.action === 'adminUpdateUser') {
@@ -580,11 +606,7 @@ export async function POST(request: NextRequest) {
         return response({ assets: await listAdminAssets(admin, true) }, cookiesToSet);
       }
 
-      const profiles = ((profileRows ?? []) as ProfileRow[]).map(userFromProfile);
-      const orders = ((orderRows ?? []) as OrderRow[]).map((row) => {
-        const customer = profiles.find((profile) => profile.id === row.user_id);
-        return { ...orderFromRow(row), customerName: customer?.name ?? 'Unknown customer', customerEmail: customer?.email ?? '', customerPhone: customer?.phone ?? '' };
-      });
+      const orders = ((orderRows ?? []) as OrderRow[]).map((row) => adminOrderFromRow(row, profiles));
       const designs = ((designRows ?? []) as Array<{ id: string; user_id: string; name: string; design_json: DesignState; preview_image: string | null; created_at: string; updated_at: string }>).map((row) => {
         const creator = profiles.find((profile) => profile.id === row.user_id);
         return {

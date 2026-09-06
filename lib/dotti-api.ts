@@ -11,7 +11,7 @@ async function call<T>(action: string, payload: Record<string, unknown> = {}) {
   });
   const data = (await response.json()) as ApiResult<T>;
   if (!response.ok) throw new Error(data.error ?? 'Felti request failed.');
-  if (!['me', 'getPricing', 'listProducts', 'listOfficialAssets', 'adminDashboard', 'getCart', 'listDesigns', 'getDesign', 'listUploads', 'listOrders', 'getOrder'].includes(action)) {
+  if (!['me', 'getPricing', 'listProducts', 'listOfficialAssets', 'adminDashboard', 'adminGetOrder', 'getCart', 'listDesigns', 'getDesign', 'listUploads', 'listOrders', 'getOrder'].includes(action)) {
     window.dispatchEvent(new Event('dotti-storage'));
   }
   return data;
@@ -48,6 +48,7 @@ export const dottiApi = {
   listOrders: () => call<{ orders: Order[] }>('listOrders'),
   getOrder: (id: string) => call<{ order: Order }>('getOrder', { id }),
   adminDashboard: () => call<{ admin: AdminDashboardData }>('adminDashboard'),
+  adminGetOrder: (orderId: string) => call<{ order: AdminDashboardData['orders'][number] }>('adminGetOrder', { orderId }),
   adminUpdateOrder: (input: { orderId: string; paymentStatus?: Order['paymentStatus']; orderStatus?: Order['orderStatus']; trackingCompany?: string; trackingNumber?: string }) =>
     call<{ order: AdminDashboardData['orders'][number] }>('adminUpdateOrder', input),
   adminUpdateUser: (input: { userId: string; role?: DottiUser['role']; membershipStatus?: DottiUser['membershipStatus']; subscriptionStart?: string; subscriptionEnd?: string }) =>
