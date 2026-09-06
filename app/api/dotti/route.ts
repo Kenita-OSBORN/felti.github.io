@@ -76,6 +76,9 @@ function response(data: unknown, cookiesToSet: Parameters<typeof applySupabaseCo
   return applySupabaseCookies(NextResponse.json(data, init), cookiesToSet);
 }
 
+const UPLOAD_BUCKET = 'dotti-uploads';
+const SIGNED_IMAGE_TTL_SECONDS = 60 * 60 * 24 * 365;
+
 function userFromProfile(profile: ProfileRow): DottiUser {
   return {
     id: profile.id,
@@ -92,6 +95,26 @@ function userFromProfile(profile: ProfileRow): DottiUser {
     subscriptionStart: profile.subscription_start ?? undefined,
     subscriptionEnd: profile.subscription_end ?? undefined,
   };
+}
+
+function internalFileUrl(path: string) {
+  return `/api/dotti/file?path=${encodeURIComponent(path)}`;
+}
+
+function storagePathFromInternalFileUrl(url: string | null | undefined) {
+  if (!url?.startsWith('/api/dotti/file?')) return null;
+  const params = new URLSearchParams(url.slice(url.indexOf('?') + 1));
+  return params.get('path');
+}
+
+async function signedUploadUrl(admin: ReturnType<typeof createSupabaseAdminClient>, path: string) {
+  const signed = await admin.storage.from(UPLOAD_BUCKET).createSignedUrl(path, SIGNED_IMAGE_TTL_SECONDS);
+  return signed.data?.signedUrl ?? internalFileUrl(path);
+}
+
+async function signedDisplayUrl(admin: ReturnType<typeof createSupabaseAdminClient>, url: string | null | undefined) {
+  const path = storagePathFromInternalFileUrl(url);
+  return path ? signedUploadUrl(admin, path) : (url ?? null);
 }
 
 function canUseVipFeatures(user: DottiUser) {
@@ -164,13 +187,13 @@ function orderFromRow(row: OrderRow): Order {
   };
 }
 
-function uploadFromRow(row: UploadRow): DottiAsset {
+async function uploadFromRow(admin: ReturnType<typeof createSupabaseAdminClient>, row: UploadRow): Promise<DottiAsset> {
   return {
     id: row.id,
     ownerId: row.user_id,
     name: row.name,
     category: 'Shapes',
-    imageUrl: row.public_url ?? `/api/dotti/file?path=${encodeURIComponent(row.storage_path)}`,
+    imageUrl: await signedUploadUrl(admin, row.storage_path),
     isVIP: true,
     productionPrice: row.kind === 'base' ? 30 : 30,
     source: 'upload',
@@ -189,10 +212,10 @@ const emptyShippingAddress: ShippingAddress = {
 };
 
 async function ensureUploadBucket(admin: ReturnType<typeof createSupabaseAdminClient>) {
-  const existing = await admin.storage.getBucket('dotti-uploads');
+  const existing = await admin.storage.getBucket(UPLOAD_BUCKET);
   if (!existing.error) return;
 
-  const created = await admin.storage.createBucket('dotti-uploads', {
+  const created = await admin.storage.createBucket(UPLOAD_BUCKET, {
     public: false,
     fileSizeLimit: 2_000_000,
     allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp'],
@@ -253,6 +276,29 @@ async function listAdminAssets(admin: ReturnType<typeof createSupabaseAdminClien
   return [...savedAssets, ...builtInAssets];
 }
 
+async function designWithDisplayImageUrls(admin: ReturnType<typeof createSupabaseAdminClient>, design: DesignState) {
+  const customBaseUrl = await signedDisplayUrl(admin, design.customBaseUrl);
+  const backgroundImageUrl = await signedDisplayUrl(admin, design.background?.imageUrl);
+  const elements = await Promise.all(
+    (design.elements ?? []).map(async (element) => ({
+      ...element,
+      imageUrl: (await signedDisplayUrl(admin, element.imageUrl)) ?? element.imageUrl,
+    })),
+  );
+
+  return {
+    ...design,
+    customBaseUrl,
+    background: design.background
+      ? {
+          ...design.background,
+          imageUrl: backgroundImageUrl,
+        }
+      : design.background,
+    elements,
+  };
+}
+
 export async function GET(request: NextRequest) {
   const cookiesToSet: Parameters<typeof applySupabaseCookies>[1] = [];
   try {
@@ -271,7 +317,7 @@ export async function GET(request: NextRequest) {
     if (!upload) return response({ error: 'File not found.' }, cookiesToSet, { status: 404 });
 
     await ensureUploadBucket(admin);
-    const { data, error } = await admin.storage.from('dotti-uploads').download(path);
+    const { data, error } = await admin.storage.from(UPLOAD_BUCKET).download(path);
     if (error || !data) return response({ error: error?.message ?? 'File not found.' }, cookiesToSet, { status: 404 });
     return applySupabaseCookies(new NextResponse(data, { headers: { 'content-type': upload.content_type, 'cache-control': 'private, max-age=3600' } }), cookiesToSet);
   } catch (error) {
@@ -294,7 +340,9 @@ function parseDataImage(imageUrl: string) {
 async function profileForUser(admin: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
   const { data, error } = await admin.from('profiles').select('*').eq('id', userId).single<ProfileRow>();
   if (error || !data) throw new Error('User profile could not be loaded.');
-  return userFromProfile(data);
+  const user = userFromProfile(data);
+  user.avatarUrl = await signedDisplayUrl(admin, user.avatarUrl);
+  return user;
 }
 
 async function ensureProfileForAuthUser(
@@ -610,9 +658,9 @@ export async function POST(request: NextRequest) {
         const uploadId = crypto.randomUUID();
         const path = `${user.id}/avatars/${uploadId}.${image.extension}`;
         await ensureUploadBucket(admin);
-        const { error } = await admin.storage.from('dotti-uploads').upload(path, image.bytes, { contentType: image.contentType, upsert: false });
+        const { error } = await admin.storage.from(UPLOAD_BUCKET).upload(path, image.bytes, { contentType: image.contentType, upsert: false });
         if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
-        avatarUrl = `/api/dotti/file?path=${encodeURIComponent(path)}`;
+        avatarUrl = internalFileUrl(path);
         await admin
           .from('uploads')
           .insert({
@@ -686,7 +734,8 @@ export async function POST(request: NextRequest) {
     if (body.action === 'listDesigns') {
       const { data, error } = await admin.from('designs').select('design_json').eq('user_id', user.id).order('updated_at', { ascending: false });
       if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
-      return response({ designs: ((data ?? []) as DesignRow[]).map((row) => row.design_json) }, cookiesToSet);
+      const designs = await Promise.all(((data ?? []) as DesignRow[]).map((row) => designWithDisplayImageUrls(admin, row.design_json)));
+      return response({ designs }, cookiesToSet);
     }
 
     if (body.action === 'saveDesign') {
@@ -719,7 +768,7 @@ export async function POST(request: NextRequest) {
     if (body.action === 'getDesign') {
       const { data, error } = await admin.from('designs').select('design_json').eq('id', String(body.id)).eq('user_id', user.id).maybeSingle<DesignRow>();
       if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
-      return data ? response({ design: data.design_json }, cookiesToSet) : response({ error: 'Design not found.' }, cookiesToSet, { status: 404 });
+      return data ? response({ design: await designWithDisplayImageUrls(admin, data.design_json) }, cookiesToSet) : response({ error: 'Design not found.' }, cookiesToSet, { status: 404 });
     }
 
     if (body.action === 'deleteDesign') {
@@ -743,7 +792,8 @@ export async function POST(request: NextRequest) {
       if (!canUseVipFeatures(user)) return response({ error: 'VIP membership is required.' }, cookiesToSet, { status: 403 });
       const { data, error } = await admin.from('uploads').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
       if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
-      return response({ uploads: ((data ?? []) as UploadRow[]).filter((row) => row.kind === 'decoration').map(uploadFromRow) }, cookiesToSet);
+      const uploads = await Promise.all(((data ?? []) as UploadRow[]).filter((row) => row.kind === 'decoration').map((row) => uploadFromRow(admin, row)));
+      return response({ uploads }, cookiesToSet);
     }
 
     if (body.action === 'deleteUpload') {
@@ -761,7 +811,7 @@ export async function POST(request: NextRequest) {
 
       const deleted = await admin.from('uploads').delete().eq('id', upload.id).eq('user_id', user.id).eq('kind', 'decoration');
       if (deleted.error) return response({ error: deleted.error.message }, cookiesToSet, { status: 400 });
-      await admin.storage.from('dotti-uploads').remove([upload.storage_path]);
+      await admin.storage.from(UPLOAD_BUCKET).remove([upload.storage_path]);
       return response({ ok: true }, cookiesToSet);
     }
 
@@ -773,9 +823,9 @@ export async function POST(request: NextRequest) {
       const uploadId = crypto.randomUUID();
       const path = `${user.id}/${kind}/${uploadId}.${image.extension}`;
       await ensureUploadBucket(admin);
-      const uploaded = await admin.storage.from('dotti-uploads').upload(path, image.bytes, { contentType: image.contentType, upsert: false });
+      const uploaded = await admin.storage.from(UPLOAD_BUCKET).upload(path, image.bytes, { contentType: image.contentType, upsert: false });
       if (uploaded.error) return response({ error: uploaded.error.message }, cookiesToSet, { status: 400 });
-      const publicUrl = `/api/dotti/file?path=${encodeURIComponent(path)}`;
+      const publicUrl = internalFileUrl(path);
       const insert = await admin
         .from('uploads')
         .insert({
@@ -791,7 +841,7 @@ export async function POST(request: NextRequest) {
         .select('*')
         .single<UploadRow>();
       if (insert.error || !insert.data) return response({ error: insert.error?.message ?? 'Upload failed.' }, cookiesToSet, { status: 400 });
-      return response({ upload: uploadFromRow(insert.data) }, cookiesToSet);
+      return response({ upload: await uploadFromRow(admin, insert.data) }, cookiesToSet);
     }
 
     if (body.action === 'getCart') {
