@@ -54,6 +54,7 @@ export const dottiApi = {
     call<{ admin: AdminDashboardData }>('adminUpdateUser', input),
   adminUpdatePricing: (pricing: PricingConfig) => call<{ pricing: PricingConfig }>('adminUpdatePricing', { pricing }),
   adminSaveProduct: (product: Product) => call<{ products: Product[] }>('adminSaveProduct', { product }),
+  adminDeleteProduct: (productId: string) => call<{ products: Product[] }>('adminDeleteProduct', { productId }),
   adminSaveAsset: (asset: AdminAssetRow) => call<{ assets: AdminAssetRow[] }>('adminSaveAsset', { asset }),
 };
 

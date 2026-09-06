@@ -509,6 +509,13 @@ export async function handleLocalDottiPost(request: NextRequest, body: ActionReq
       return json({ products: db.products });
     }
 
+    if (body.action === 'adminDeleteProduct') {
+      const productId = String(body.productId ?? '');
+      db.products = (db.products ?? seedProducts).filter((product) => product.id !== productId);
+      await writeDb(db);
+      return json({ products: db.products });
+    }
+
     if (body.action === 'adminSaveAsset') {
       const input = body.asset as AdminAssetRow;
       const assets = db.assets ?? [];

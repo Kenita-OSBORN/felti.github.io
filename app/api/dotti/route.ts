@@ -559,6 +559,14 @@ export async function POST(request: NextRequest) {
         return response({ products: await listProducts(admin, true) }, cookiesToSet);
       }
 
+      if (body.action === 'adminDeleteProduct') {
+        const productId = String(body.productId ?? '').trim();
+        if (!productId) return response({ error: 'Missing product ID.' }, cookiesToSet, { status: 400 });
+        const { error } = await admin.from('products').delete().eq('id', productId);
+        if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+        return response({ products: await listProducts(admin, true) }, cookiesToSet);
+      }
+
       if (body.action === 'adminSaveAsset') {
         const asset = normalizeAdminAsset(body.asset as AdminAssetRow);
         if (!asset.imageUrl) return response({ error: 'Please upload or enter an asset image before saving.' }, cookiesToSet, { status: 400 });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Eye, PackageCheck, Save, Search, ShieldCheck } from 'lucide-react';
+import { Eye, PackageCheck, Save, Search, ShieldCheck, Trash2 } from 'lucide-react';
 
 import { ProductArt } from '@/components/common/product-art';
 import { PageShell } from '@/components/common/page-shell';
@@ -151,6 +151,20 @@ export default function AdminPage() {
       await refresh();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Product could not be saved.');
+    }
+  };
+
+  const deleteProduct = async (product: Product) => {
+    if (!window.confirm(`Delete "${product.name}" from the storefront?`)) return;
+    setFormError('');
+    setMessage('');
+    try {
+      await dottiApi.adminDeleteProduct(product.id);
+      if (productForm.id === product.id) setProductForm(emptyProduct);
+      setMessage('Product deleted.');
+      await refresh();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Product could not be deleted.');
     }
   };
 
@@ -346,7 +360,13 @@ export default function AdminPage() {
                   <div key={product.id} className="grid gap-3 rounded-3xl bg-[var(--dotti-bg)] p-4 md:grid-cols-[80px_1fr_auto]">
                     <ProductArt assetIds={product.assetIds} imageUrl={product.imageUrl} alt={product.name} />
                     <div><b>{product.name}</b><p className="text-sm text-[var(--dotti-muted)]">฿{product.price} · Stock {product.stock} · {product.category} · {product.active ? 'Active' : 'Inactive'}</p></div>
-                    <Button variant="outline" className="rounded-full bg-white" onClick={() => setProductForm(product)}>Edit</Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" className="rounded-full bg-white" onClick={() => setProductForm(product)}>Edit</Button>
+                      <Button variant="outline" className="rounded-full bg-white text-red-600 hover:bg-red-50" onClick={() => void deleteProduct(product)}>
+                        <Trash2 className="size-4" />
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
