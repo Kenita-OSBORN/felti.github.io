@@ -78,6 +78,7 @@ export default function AdminPage() {
   const [productForm, setProductForm] = useState<Product>(emptyProduct);
   const [assetForm, setAssetForm] = useState<AdminAssetRow>(emptyAsset);
   const [message, setMessage] = useState('');
+  const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState('');
 
@@ -128,30 +129,54 @@ export default function AdminPage() {
   }, [admin, orderFilter, query]);
 
   const savePricing = async () => {
-    const { pricing: savedPricing } = await dottiApi.adminUpdatePricing(pricingFormNumbers(pricing));
-    setPricing(savedPricing);
-    setMessage('Pricing saved. DIY pricing will use this configuration.');
-    await refresh();
+    setFormError('');
+    setMessage('');
+    try {
+      const { pricing: savedPricing } = await dottiApi.adminUpdatePricing(pricingFormNumbers(pricing));
+      setPricing(savedPricing);
+      setMessage('Pricing saved. DIY pricing will use this configuration.');
+      await refresh();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Pricing could not be saved.');
+    }
   };
 
   const saveProduct = async () => {
-    await dottiApi.adminSaveProduct({ ...productForm, id: productForm.id || crypto.randomUUID(), price: Number(productForm.price), stock: Number(productForm.stock) });
-    setProductForm(emptyProduct);
-    setMessage('Product saved.');
-    await refresh();
+    setFormError('');
+    setMessage('');
+    try {
+      await dottiApi.adminSaveProduct({ ...productForm, id: productForm.id || crypto.randomUUID(), price: Number(productForm.price), stock: Number(productForm.stock) });
+      setProductForm(emptyProduct);
+      setMessage('Product saved.');
+      await refresh();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Product could not be saved.');
+    }
   };
 
   const saveAsset = async () => {
-    await dottiApi.adminSaveAsset({ ...assetForm, id: assetForm.id || crypto.randomUUID(), productionPrice: Number(assetForm.productionPrice) });
-    setAssetForm(emptyAsset);
-    setMessage('DIY asset saved.');
-    await refresh();
+    setFormError('');
+    setMessage('');
+    try {
+      await dottiApi.adminSaveAsset({ ...assetForm, id: assetForm.id || crypto.randomUUID(), productionPrice: Number(assetForm.productionPrice) });
+      setAssetForm(emptyAsset);
+      setMessage('DIY asset saved.');
+      await refresh();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'DIY asset could not be saved.');
+    }
   };
 
   const updateUser = async (target: AdminDashboardData['users'][number], patch: Partial<DottiUser>) => {
-    await dottiApi.adminUpdateUser({ userId: target.id, ...patch });
-    setMessage('User membership updated.');
-    await refresh();
+    setFormError('');
+    setMessage('');
+    try {
+      await dottiApi.adminUpdateUser({ userId: target.id, ...patch });
+      setMessage('User membership updated.');
+      await refresh();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'User could not be updated.');
+    }
   };
 
   if (loading) {
@@ -195,7 +220,7 @@ export default function AdminPage() {
       <div className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]">
         <aside className="h-fit rounded-[28px] bg-[var(--dotti-ink)] p-3 text-white shadow-[var(--dotti-shadow)]">
           {sections.map((section) => (
-            <button key={section} onClick={() => { setActive(section); setMessage(''); }} className={`mb-2 flex w-full items-center rounded-full px-4 py-3 text-left text-sm font-black ${active === section ? 'bg-white text-[var(--dotti-ink)]' : 'text-white/72 hover:bg-white/10'}`}>
+            <button key={section} onClick={() => { setActive(section); setMessage(''); setFormError(''); }} className={`mb-2 flex w-full items-center rounded-full px-4 py-3 text-left text-sm font-black ${active === section ? 'bg-white text-[var(--dotti-ink)]' : 'text-white/72 hover:bg-white/10'}`}>
               {section}
             </button>
           ))}
@@ -212,6 +237,7 @@ export default function AdminPage() {
             )}
           </div>
           {message && <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">{message}</p>}
+          {formError && <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{formError}</p>}
 
           {active === 'Dashboard' && (
             <div className="mt-5 space-y-6">
@@ -445,14 +471,14 @@ function ProductForm({ product, setProduct, onSave }: { product: Product; setPro
         <ProductArt assetIds={product.assetIds} className="mt-4" />
       )}
       <div className="mt-4 grid gap-3">
-        <Input className="rounded-full bg-white" placeholder="Product name" value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} />
-        <Textarea className="rounded-3xl bg-white" placeholder="Description" value={product.description} onChange={(event) => setProduct({ ...product, description: event.target.value })} />
-        <label className="rounded-full bg-white px-4 py-2 text-sm font-black">Upload Product Image<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void upload(event.target.files?.[0])} /></label>
-        <Input className="rounded-full bg-white" placeholder="Category" value={product.category} onChange={(event) => setProduct({ ...product, category: event.target.value })} />
-        <Input className="rounded-full bg-white" placeholder="Material" value={product.material} onChange={(event) => setProduct({ ...product, material: event.target.value })} />
-        <Input className="rounded-full bg-white" placeholder="Asset IDs, comma separated" value={product.assetIds.join(', ')} onChange={(event) => setProduct({ ...product, assetIds: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} />
-        <Input className="rounded-full bg-white" type="number" placeholder="Price" value={product.price} onChange={(event) => setProduct({ ...product, price: Number(event.target.value) })} />
-        <Input className="rounded-full bg-white" type="number" placeholder="Stock" value={product.stock} onChange={(event) => setProduct({ ...product, stock: Number(event.target.value) })} />
+        <label className="text-sm font-black">Product Name<Input className="mt-2 rounded-full bg-white" placeholder="Blush Daisy Brooch" value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} /></label>
+        <label className="text-sm font-black">Product Description<Textarea className="mt-2 rounded-3xl bg-white" placeholder="Short product information shown on the shop page" value={product.description} onChange={(event) => setProduct({ ...product, description: event.target.value })} /></label>
+        <label className="cursor-pointer rounded-full bg-white px-4 py-2 text-sm font-black ring-1 ring-[var(--dotti-border)]">Product Image<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void upload(event.target.files?.[0])} /></label>
+        <label className="text-sm font-black">Category<Input className="mt-2 rounded-full bg-white" placeholder="Brooches" value={product.category} onChange={(event) => setProduct({ ...product, category: event.target.value })} /></label>
+        <label className="text-sm font-black">Material<Input className="mt-2 rounded-full bg-white" placeholder="Wool felt" value={product.material} onChange={(event) => setProduct({ ...product, material: event.target.value })} /></label>
+        <label className="text-sm font-black">DIY Asset IDs<Input className="mt-2 rounded-full bg-white" placeholder="daisy, soft-leaf" value={product.assetIds.join(', ')} onChange={(event) => setProduct({ ...product, assetIds: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} /></label>
+        <label className="text-sm font-black">Price ฿<Input className="mt-2 rounded-full bg-white" type="number" placeholder="180" value={product.price} onChange={(event) => setProduct({ ...product, price: Number(event.target.value) })} /></label>
+        <label className="text-sm font-black">Stock Quantity<Input className="mt-2 rounded-full bg-white" type="number" placeholder="20" value={product.stock} onChange={(event) => setProduct({ ...product, stock: Number(event.target.value) })} /></label>
         <label className="flex items-center gap-2 text-sm font-black"><input type="checkbox" checked={product.active} onChange={(event) => setProduct({ ...product, active: event.target.checked })} /> Active</label>
       </div>
       <Button onClick={onSave} className="mt-5 w-full rounded-full bg-[var(--dotti-berry)] text-white">Save Product</Button>
@@ -470,10 +496,10 @@ function AssetForm({ asset, setAsset, onSave }: { asset: AdminAssetRow; setAsset
       <h3 className="text-xl font-black">{asset.id ? 'Edit Asset' : 'Add Asset'}</h3>
       {asset.imageUrl && <img src={asset.imageUrl} alt="" className="mt-4 size-24 rounded-2xl bg-white p-2 object-contain" />}
       <div className="mt-4 grid gap-3">
-        <Input className="rounded-full bg-white" placeholder="Asset name" value={asset.name} onChange={(event) => setAsset({ ...asset, name: event.target.value })} />
-        <Input className="rounded-full bg-white" placeholder="Category" value={asset.category} onChange={(event) => setAsset({ ...asset, category: event.target.value })} />
-        <Input type="number" className="rounded-full bg-white" placeholder="Production price" value={asset.productionPrice} onChange={(event) => setAsset({ ...asset, productionPrice: Number(event.target.value) })} />
-        <label className="rounded-full bg-white px-4 py-2 text-sm font-black">Upload Felt Asset Image<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void upload(event.target.files?.[0])} /></label>
+        <label className="text-sm font-black">Asset Name<Input className="mt-2 rounded-full bg-white" placeholder="Daisy" value={asset.name} onChange={(event) => setAsset({ ...asset, name: event.target.value })} /></label>
+        <label className="text-sm font-black">Category<Input className="mt-2 rounded-full bg-white" placeholder="Flowers" value={asset.category} onChange={(event) => setAsset({ ...asset, category: event.target.value })} /></label>
+        <label className="text-sm font-black">Production Price ฿<Input type="number" className="mt-2 rounded-full bg-white" placeholder="8" value={asset.productionPrice} onChange={(event) => setAsset({ ...asset, productionPrice: Number(event.target.value) })} /></label>
+        <label className="cursor-pointer rounded-full bg-white px-4 py-2 text-sm font-black ring-1 ring-[var(--dotti-border)]">Felt Asset Image<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void upload(event.target.files?.[0])} /></label>
         <label className="flex items-center gap-2 text-sm font-black"><input type="checkbox" checked={asset.isVIP} onChange={(event) => setAsset({ ...asset, isVIP: event.target.checked, source: event.target.checked ? 'premium' : 'dotti' })} /> VIP only</label>
         <label className="flex items-center gap-2 text-sm font-black"><input type="checkbox" checked={asset.colorEditable} onChange={(event) => setAsset({ ...asset, colorEditable: event.target.checked })} /> Color editable</label>
         <label className="flex items-center gap-2 text-sm font-black"><input type="checkbox" checked={asset.active} onChange={(event) => setAsset({ ...asset, active: event.target.checked })} /> Active</label>

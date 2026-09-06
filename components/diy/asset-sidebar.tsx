@@ -14,6 +14,7 @@ type AssetSidebarProps = {
   onCategoryChange: (category: AssetCategory | 'All') => void;
   onAssetFilterChange: (filter: 'All' | 'Free' | 'VIP' | 'Recently used' | 'Favorites') => void;
   onSearchChange: (value: string) => void;
+  libraryAssets: DottiAsset[];
   onAddAsset: (asset: DottiAsset) => void;
   canUseVIP: boolean;
   uploads: DottiAsset[];
@@ -29,6 +30,7 @@ export function AssetSidebar({
   onCategoryChange,
   onAssetFilterChange,
   onSearchChange,
+  libraryAssets,
   onAddAsset,
   canUseVIP,
   uploads,
@@ -36,7 +38,8 @@ export function AssetSidebar({
   onUploadDecoration,
   onDeleteUpload,
 }: AssetSidebarProps) {
-  const allAssets = [...pricedDottiAssets, ...uploads];
+  const baseAssets = libraryAssets.length ? libraryAssets : pricedDottiAssets;
+  const allAssets = [...baseAssets, ...uploads];
   const categories = [
     ...assetCategories.map((category) => ({
       key: category,

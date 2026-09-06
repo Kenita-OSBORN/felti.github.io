@@ -618,14 +618,14 @@ export function DIYStudio() {
     }
     try {
       const imageUrl = await fileToDataUrl(file);
-      await dottiApi.uploadBackground({ name: `Background ${file.name}`, imageUrl });
+      const { upload } = await dottiApi.uploadBackground({ name: `Background ${file.name}`, imageUrl });
       commitDesign({
         ...design,
         background: {
           type: 'upload',
           color: design.background?.color ?? defaultBackground.color,
           pattern: 'plain',
-          imageUrl,
+          imageUrl: upload.imageUrl,
         },
       });
     } catch (error) {
@@ -699,6 +699,7 @@ export function DIYStudio() {
       assetFilter={assetFilter}
       onAssetFilterChange={setAssetFilter}
       onSearchChange={setSearchTerm}
+      libraryAssets={officialAssets}
       onAddAsset={addAsset}
       canUseVIP={!!canUseVIP}
       uploads={uploads}

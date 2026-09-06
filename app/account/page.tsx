@@ -13,7 +13,7 @@ import { calculateDesignPrice } from '@/lib/pricing';
 import type { DottiUser, Order, ShippingAddress } from '@/types/commerce';
 import type { DesignState, DottiAsset } from '@/types/dotti';
 
-const menu = ['My Profile', 'My Designs', 'My Orders', 'My Uploads', 'VIP Membership', 'Addresses', 'Account Settings', 'Logout'];
+const menu = ['My Profile', 'My Designs', 'My Orders', 'My Uploads', 'VIP Membership', 'Addresses', 'Logout'];
 
 const emptyAddress: ShippingAddress = {
   fullName: '',
@@ -71,10 +71,29 @@ export default function AccountPage() {
 
   const saveProfile = async () => {
     setError('');
-    const { user } = await dottiApi.updateProfile(profile);
-    setUser(user);
-    setProfile(user);
-    setMessage('Profile saved.');
+    setMessage('');
+    try {
+      const { user } = await dottiApi.updateProfile(profile);
+      setUser(user);
+      setProfile(user);
+      setMessage('Profile saved.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Profile could not be saved.');
+    }
+  };
+
+  const saveAddress = async () => {
+    setError('');
+    setMessage('');
+    try {
+      const shippingAddress = { ...emptyAddress, ...(profile.shippingAddress ?? {}) };
+      const { user } = await dottiApi.updateProfile({ ...profile, shippingAddress });
+      setUser(user);
+      setProfile(user);
+      setMessage('Address saved.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Address could not be saved.');
+    }
   };
 
   const joinVip = async () => {
@@ -187,6 +206,7 @@ export default function AccountPage() {
               <label className="mt-4 block text-sm font-bold">Bio<Textarea className="mt-2 rounded-3xl" value={profile.bio ?? ''} onChange={(event) => setProfile({ ...profile, bio: event.target.value })} placeholder="I love flowers and cute things ♡" /></label>
               <Button onClick={() => void saveProfile()} className="mt-6 rounded-full bg-[var(--dotti-berry)] text-white hover:bg-[var(--dotti-berry-dark)]">Save Profile</Button>
               {message && <p className="mt-3 text-sm font-bold text-[var(--dotti-success)]">{message}</p>}
+              {error && <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{error}</p>}
             </div>
           )}
 
@@ -319,11 +339,11 @@ export default function AccountPage() {
                   </label>
                 ))}
               </div>
-              <Button onClick={() => void saveProfile()} className="mt-6 rounded-full bg-[var(--dotti-berry)] text-white hover:bg-[var(--dotti-berry-dark)]">Save Address</Button>
+              <Button onClick={() => void saveAddress()} className="mt-6 rounded-full bg-[var(--dotti-berry)] text-white hover:bg-[var(--dotti-berry-dark)]">Save Address</Button>
+              {message && <p className="mt-3 text-sm font-bold text-[var(--dotti-success)]">{message}</p>}
+              {error && <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{error}</p>}
             </div>
           )}
-
-          {active === 'Account Settings' && <div><h2 className="text-2xl font-black">Account Settings</h2><p className="mt-3 text-[var(--dotti-muted)]">Logout keeps your Felti account, saved designs, uploads, and orders intact.</p></div>}
         </section>
       </div>
     </PageShell>

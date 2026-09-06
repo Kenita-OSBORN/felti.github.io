@@ -6,7 +6,7 @@ import { applySupabaseCookies, createSupabaseAdminClient, createSupabaseRouteCli
 import { hasSupabaseEnv } from '@/lib/supabase/env';
 import { pricedDottiAssets } from '@/data/assets';
 import { products as seedProducts } from '@/data/mock-commerce';
-import type { AdminDashboardData, CartItem, DottiUser, Order, PricingConfig, Product, ShippingAddress } from '@/types/commerce';
+import type { AdminAssetRow, AdminDashboardData, CartItem, DottiUser, Order, PricingConfig, Product, ShippingAddress } from '@/types/commerce';
 import type { DesignState, DottiAsset } from '@/types/dotti';
 
 export const runtime = 'nodejs';
@@ -60,6 +60,11 @@ type OrderRow = {
 type ProductRow = {
   id: string;
   product_json: Product;
+  active: boolean;
+};
+type AdminAssetDbRow = {
+  id: string;
+  asset_json: AdminAssetRow;
   active: boolean;
 };
 
@@ -124,6 +129,22 @@ function normalizeProduct(product: Product): Product {
   };
 }
 
+function normalizeAdminAsset(asset: AdminAssetRow): AdminAssetRow {
+  const isVIP = Boolean(asset.isVIP);
+  return {
+    id: String(asset.id || crypto.randomUUID()),
+    name: String(asset.name ?? '').trim() || 'Untitled Asset',
+    category: String(asset.category ?? '').trim() || 'Shapes',
+    imageUrl: String(asset.imageUrl ?? '').trim(),
+    source: isVIP ? 'premium' : (asset.source === 'upload' ? 'upload' : 'dotti'),
+    isVIP,
+    productionPrice: Number(asset.productionPrice ?? (isVIP ? 15 : 8)),
+    colorEditable: Boolean(asset.colorEditable),
+    active: asset.active !== false,
+    ownerEmail: asset.ownerEmail,
+  };
+}
+
 function orderFromRow(row: OrderRow): Order {
   return {
     id: row.id,
@@ -167,6 +188,20 @@ const emptyShippingAddress: ShippingAddress = {
   country: '',
 };
 
+async function ensureUploadBucket(admin: ReturnType<typeof createSupabaseAdminClient>) {
+  const existing = await admin.storage.getBucket('dotti-uploads');
+  if (!existing.error) return;
+
+  const created = await admin.storage.createBucket('dotti-uploads', {
+    public: false,
+    fileSizeLimit: 2_000_000,
+    allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp'],
+  });
+  if (created.error && !/already exists/i.test(created.error.message)) {
+    throw new Error(created.error.message);
+  }
+}
+
 function isVipMembershipOrder(order: OrderRow | Order) {
   return orderFromUnknownItems(order).some((item) => item.itemType === 'membership' || item.productId === 'felti-vip-monthly');
 }
@@ -194,6 +229,30 @@ async function listProducts(admin: ReturnType<typeof createSupabaseAdminClient>,
   return products.length ? products : seedProducts;
 }
 
+async function listAdminAssets(admin: ReturnType<typeof createSupabaseAdminClient>, includeInactive = false) {
+  let query = admin.from('admin_assets').select('id, asset_json, active').order('updated_at', { ascending: false });
+  if (!includeInactive) query = query.eq('active', true);
+  const { data, error } = await query;
+  const savedAssets = error
+    ? []
+    : ((data ?? []) as AdminAssetDbRow[]).map((row) => ({ ...row.asset_json, id: row.id, active: row.active }));
+  const savedIds = new Set(savedAssets.map((asset) => asset.id));
+  const builtInAssets = pricedDottiAssets
+    .filter((asset) => includeInactive || !savedIds.has(asset.id))
+    .map((asset) => ({
+      id: asset.id,
+      name: asset.name,
+      category: asset.category,
+      imageUrl: asset.imageUrl,
+      source: asset.source ?? (asset.isVIP ? 'premium' : 'dotti'),
+      isVIP: Boolean(asset.isVIP),
+      productionPrice: asset.productionPrice ?? (asset.isVIP ? 15 : 8),
+      colorEditable: Boolean(asset.colorEditable),
+      active: true,
+    }));
+  return [...savedAssets, ...builtInAssets];
+}
+
 export async function GET(request: NextRequest) {
   const cookiesToSet: Parameters<typeof applySupabaseCookies>[1] = [];
   try {
@@ -211,6 +270,7 @@ export async function GET(request: NextRequest) {
     if (uploadError) return response({ error: uploadError.message }, cookiesToSet, { status: 400 });
     if (!upload) return response({ error: 'File not found.' }, cookiesToSet, { status: 404 });
 
+    await ensureUploadBucket(admin);
     const { data, error } = await admin.storage.from('dotti-uploads').download(path);
     if (error || !data) return response({ error: error?.message ?? 'File not found.' }, cookiesToSet, { status: 404 });
     return applySupabaseCookies(new NextResponse(data, { headers: { 'content-type': upload.content_type, 'cache-control': 'private, max-age=3600' } }), cookiesToSet);
@@ -386,19 +446,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.action === 'listOfficialAssets') {
-      return response({
-        assets: pricedDottiAssets.map((asset) => ({
-          id: asset.id,
-          name: asset.name,
-          category: asset.category,
-          imageUrl: asset.imageUrl,
-          source: asset.source ?? (asset.isVIP ? 'premium' : 'dotti'),
-          isVIP: Boolean(asset.isVIP),
-          productionPrice: asset.productionPrice ?? (asset.isVIP ? 15 : 8),
-          colorEditable: Boolean(asset.colorEditable),
-          active: true,
-        })),
-      }, cookiesToSet);
+      return response({ assets: await listAdminAssets(admin) }, cookiesToSet);
     }
 
     const user = await requireUser(request, cookiesToSet);
@@ -406,12 +454,13 @@ export async function POST(request: NextRequest) {
     if (String(body.action).startsWith('admin')) {
       if (user.role !== 'admin') return response({ error: 'Admin access required.' }, cookiesToSet, { status: 403 });
 
-      const [{ data: profileRows, error: profilesError }, { data: orderRows, error: ordersError }, { data: designRows, error: designsError }, { data: uploadRows }, productRowsResult, pricingResult] = await Promise.all([
+      const [{ data: profileRows, error: profilesError }, { data: orderRows, error: ordersError }, { data: designRows, error: designsError }, { data: uploadRows }, productRowsResult, assetRowsResult, pricingResult] = await Promise.all([
         admin.from('profiles').select('*').order('created_at', { ascending: false }),
         admin.from('orders').select('*').order('created_at', { ascending: false }),
         admin.from('designs').select('id,user_id,name,design_json,preview_image,created_at,updated_at').order('updated_at', { ascending: false }),
         admin.from('uploads').select('*').order('created_at', { ascending: false }),
         admin.from('products').select('id, product_json, active').order('updated_at', { ascending: false }),
+        admin.from('admin_assets').select('id, asset_json, active').order('updated_at', { ascending: false }),
         admin.from('pricing').select('config_json').eq('id', 'current').maybeSingle<{ config_json: PricingConfig }>(),
       ]);
       if (profilesError) return response({ error: profilesError.message }, cookiesToSet, { status: 400 });
@@ -462,6 +511,19 @@ export async function POST(request: NextRequest) {
         return response({ products: await listProducts(admin, true) }, cookiesToSet);
       }
 
+      if (body.action === 'adminSaveAsset') {
+        const asset = normalizeAdminAsset(body.asset as AdminAssetRow);
+        if (!asset.imageUrl) return response({ error: 'Please upload or enter an asset image before saving.' }, cookiesToSet, { status: 400 });
+        const { error } = await admin.from('admin_assets').upsert({
+          id: asset.id,
+          asset_json: asset,
+          active: asset.active,
+          updated_at: new Date().toISOString(),
+        });
+        if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
+        return response({ assets: await listAdminAssets(admin, true) }, cookiesToSet);
+      }
+
       const profiles = ((profileRows ?? []) as ProfileRow[]).map(userFromProfile);
       const orders = ((orderRows ?? []) as OrderRow[]).map((row) => {
         const customer = profiles.find((profile) => profile.id === row.user_id);
@@ -498,6 +560,25 @@ export async function POST(request: NextRequest) {
         ? productRows.map((row) => ({ ...row.product_json, id: row.id, active: row.active }))
         : seedProducts;
       const pricing = { ...defaultPricingConfig, ...(pricingResult.data?.config_json ?? {}) };
+      const savedAssetRows = assetRowsResult.error ? [] : ((assetRowsResult.data ?? []) as AdminAssetDbRow[]);
+      const savedAssets = savedAssetRows.map((row) => ({ ...row.asset_json, id: row.id, active: row.active }));
+      const savedAssetIds = new Set(savedAssets.map((asset) => asset.id));
+      const assets = [
+        ...savedAssets,
+        ...pricedDottiAssets
+          .filter((asset) => !savedAssetIds.has(asset.id))
+          .map((asset) => ({
+            id: asset.id,
+            name: asset.name,
+            category: asset.category,
+            imageUrl: asset.imageUrl,
+            source: asset.source ?? (asset.isVIP ? 'premium' : 'dotti'),
+            isVIP: Boolean(asset.isVIP),
+            productionPrice: asset.productionPrice ?? (asset.isVIP ? 15 : 8),
+            colorEditable: Boolean(asset.colorEditable),
+            active: true,
+          })),
+      ];
       const adminData: AdminDashboardData = {
         stats: {
           totalUsers: users.length,
@@ -512,17 +593,7 @@ export async function POST(request: NextRequest) {
         users,
         orders,
         designs,
-        assets: pricedDottiAssets.map((asset) => ({
-          id: asset.id,
-          name: asset.name,
-          category: asset.category,
-          imageUrl: asset.imageUrl,
-          source: asset.source ?? (asset.isVIP ? 'premium' : 'dotti'),
-          isVIP: Boolean(asset.isVIP),
-          productionPrice: asset.productionPrice ?? (asset.isVIP ? 15 : 8),
-          colorEditable: Boolean(asset.colorEditable),
-          active: true,
-        })),
+        assets,
         pricing,
         products,
         memberships: users.filter((item) => item.role === 'vip' || item.role === 'admin' || item.membershipStatus !== 'None'),
@@ -538,6 +609,7 @@ export async function POST(request: NextRequest) {
         if ('error' in image) return response({ error: image.error }, cookiesToSet, { status: 400 });
         const uploadId = crypto.randomUUID();
         const path = `${user.id}/avatars/${uploadId}.${image.extension}`;
+        await ensureUploadBucket(admin);
         const { error } = await admin.storage.from('dotti-uploads').upload(path, image.bytes, { contentType: image.contentType, upsert: false });
         if (error) return response({ error: error.message }, cookiesToSet, { status: 400 });
         avatarUrl = `/api/dotti/file?path=${encodeURIComponent(path)}`;
@@ -700,6 +772,7 @@ export async function POST(request: NextRequest) {
       const kind = body.action === 'uploadBase' ? 'base' : body.action === 'uploadBackground' ? 'background' : 'decoration';
       const uploadId = crypto.randomUUID();
       const path = `${user.id}/${kind}/${uploadId}.${image.extension}`;
+      await ensureUploadBucket(admin);
       const uploaded = await admin.storage.from('dotti-uploads').upload(path, image.bytes, { contentType: image.contentType, upsert: false });
       if (uploaded.error) return response({ error: uploaded.error.message }, cookiesToSet, { status: 400 });
       const publicUrl = `/api/dotti/file?path=${encodeURIComponent(path)}`;
