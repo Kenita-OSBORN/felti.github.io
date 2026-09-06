@@ -249,7 +249,7 @@ async function listProducts(admin: ReturnType<typeof createSupabaseAdminClient>,
   const { data, error } = await query;
   if (error) return seedProducts;
   const products = ((data ?? []) as ProductRow[]).map((row) => ({ ...row.product_json, id: row.id, active: row.active }));
-  return products.length ? products : seedProducts;
+  return products;
 }
 
 async function listAdminAssets(admin: ReturnType<typeof createSupabaseAdminClient>, includeInactive = false) {
